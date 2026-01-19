@@ -1,0 +1,9 @@
+build/
+.venv/
+out/
+*.egg-info/
+*:Zone.Identifier
+/**/output2/design/
+.converter_input
+.dvt/
+dvt_build.log

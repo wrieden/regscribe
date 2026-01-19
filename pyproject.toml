@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regscribe"
+authors = [
+    { name = "Sven Wrieden" },
+]
+description = "A universal register map transcription tool."
+readme = "README.md"
+license = "MPL-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Utilities",
+]
+
+requires-python = ">=3.12"
+dependencies = [
+    "latexify-py",
+    "IPython",
+    "attrs",
+    "sympy",
+    "tabulate",
+    "bs4",
+    "requests",
+    "lxml",
+    "python-docx",
+    "matplotlib",
+    "narwhals",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/wrieden/regscribe"
+Issues = "https://github.com/wrieden/regscribe/issues"
+
+[project.scripts]
+regscribe = "regscribe.converter:main"
+
+[tool.setuptools.packages]
+find = {}
+
+[tool.setuptools.dynamic]
+version = { attr = "regscribe.converter.__version__" }
