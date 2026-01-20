@@ -1276,15 +1276,10 @@ class Composer:
 
 
 def main(cmdline=None):
-    # setup argparse
-
-
-    # if importlib.util.find_spec(f"regscribe.external.parse_{args.parser}") is not None:
-
-    parsers = glob(os.path.join(os.path.dirname(__file__), "parse_*.py")) + glob(os.path.join(f"{os.path.dirname(__file__)}", "external", "parse_*.py"))
+    external_path = os.path.abspath(os.path.join(os.path.dirname(__file__), f'../../'))
+    parsers = glob(os.path.join(os.path.dirname(__file__), "parse_*.py")) + glob(os.path.join(external_path, "parse_*.py"))
     parsers = [re.sub(r"parse_(\w+).py", r"\g<1>", os.path.basename(x)) for x in parsers]
-    
-    composers = glob(os.path.join(os.path.dirname(__file__), "compose_*.py")) + glob(os.path.join(f"{os.path.dirname(__file__)}", "external", "compose_*.py"))
+    composers = glob(os.path.join(os.path.dirname(__file__), "compose_*.py")) + glob(os.path.join(external_path, "compose_*.py"))
     composers = [re.sub(r"compose_(\w+).py", r"\g<1>", os.path.basename(x)) for x in composers]
 
     argparser = argparse.ArgumentParser(add_help=False)
@@ -1294,26 +1289,30 @@ def main(cmdline=None):
     group.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity level")
     group.add_argument("--demote_name_check", action="store_true", help="Accept invalid names")
     group.add_argument("--skip_validity_check", action="store_true", help="Skip validity checks, may lead to broken outputs or crashes")
-    # group.add_argument('--outdir', default='output', help='Output directory for generated files')
 
     args, remaining = argparser.parse_known_args(cmdline)
     Log.setup([logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 3)])
 
     # get parser arguments
-    if importlib.util.find_spec(f"regscribe.external.parse_{args.parser}") is not None:
-        parser_module = importlib.import_module(f"regscribe.external.parse_{args.parser}")
-    else:
+
+    if importlib.util.find_spec(f"regscribe.parse_{args.parser}") is not None:
         parser_module = importlib.import_module(f"regscribe.parse_{args.parser}")
+    else:
+        spec = importlib.util.spec_from_file_location(f"parse_{args.parser}", os.path.abspath(os.path.join(external_path, f'parse_{args.parser}.py')))
+        parser_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(parser_module)
 
     parser: Parser = parser_module.get_parser()
     parse_parents = [parser.get_argparse()]
 
     # get composer arguments
     if args.composer != "project":
-        if importlib.util.find_spec(f"regscribe.external.compose_{args.composer}") is not None:
-            composer_module = importlib.import_module(f"regscribe.external.compose_{args.composer}")
-        else:
+        if importlib.util.find_spec(f"regscribe.compose_{args.composer}") is not None:
             composer_module = importlib.import_module(f"regscribe.compose_{args.composer}")
+        else:
+            spec = importlib.util.spec_from_file_location(f"compose_{args.composer}", os.path.abspath(os.path.join(external_path, f'compose_{args.composer}.py')))
+            composer_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(composer_module)
 
 
         composer: Composer = composer_module.get_composer()
