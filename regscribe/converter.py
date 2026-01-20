@@ -12,6 +12,7 @@ from enum import Enum
 from functools import partial
 from threading import Event
 from typing import Optional
+from glob import glob
 
 import math
 from math import log, log10, log2, ceil, floor
@@ -1276,10 +1277,20 @@ class Composer:
 
 def main(cmdline=None):
     # setup argparse
+
+
+    # if importlib.util.find_spec(f"regscribe.external.parse_{args.parser}") is not None:
+
+    parsers = glob(os.path.join(os.path.dirname(__file__), "parse_*.py")) + glob(os.path.join(f"{os.path.dirname(__file__)}", "external", "parse_*.py"))
+    parsers = [re.sub(r"parse_(\w+).py", r"\g<1>", os.path.basename(x)) for x in parsers]
+    
+    composers = glob(os.path.join(os.path.dirname(__file__), "compose_*.py")) + glob(os.path.join(f"{os.path.dirname(__file__)}", "external", "compose_*.py"))
+    composers = [re.sub(r"compose_(\w+).py", r"\g<1>", os.path.basename(x)) for x in composers]
+
     argparser = argparse.ArgumentParser(add_help=False)
     group = argparser.add_argument_group("Generic Arguments")
-    group.add_argument("-p", "--parser", choices=["xml"], default="xml", help="Selects the used parser")
-    group.add_argument("-c", "--composer", choices=["xml", "cpp", "pdf", "sv", "project", "list"], default="xml", help="Selects the used composer")
+    group.add_argument("-p", "--parser", choices=parsers, default="xml", help="Selects the used parser")
+    group.add_argument("-c", "--composer", choices=composers+["project"], default="xml", help="Selects the used composer")
     group.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity level")
     group.add_argument("--demote_name_check", action="store_true", help="Accept invalid names")
     group.add_argument("--skip_validity_check", action="store_true", help="Skip validity checks, may lead to broken outputs or crashes")
@@ -1289,13 +1300,22 @@ def main(cmdline=None):
     Log.setup([logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 3)])
 
     # get parser arguments
-    parser_module = importlib.import_module(f"regscribe.parse_{args.parser}")
+    if importlib.util.find_spec(f"regscribe.external.parse_{args.parser}") is not None:
+        parser_module = importlib.import_module(f"regscribe.external.parse_{args.parser}")
+    else:
+        parser_module = importlib.import_module(f"regscribe.parse_{args.parser}")
+
     parser: Parser = parser_module.get_parser()
     parse_parents = [parser.get_argparse()]
 
     # get composer arguments
     if args.composer != "project":
-        composer_module = importlib.import_module(f"regscribe.compose_{args.composer}")
+        if importlib.util.find_spec(f"regscribe.external.compose_{args.composer}") is not None:
+            composer_module = importlib.import_module(f"regscribe.external.compose_{args.composer}")
+        else:
+            composer_module = importlib.import_module(f"regscribe.compose_{args.composer}")
+
+
         composer: Composer = composer_module.get_composer()
         parse_parents.append(composer.get_argparse())
 
