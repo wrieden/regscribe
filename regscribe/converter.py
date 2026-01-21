@@ -1276,7 +1276,8 @@ class Composer:
 
 
 def main(cmdline=None):
-    external_path = os.path.abspath(os.path.join(os.path.dirname(__file__), f'../../'))
+    print(os.path.abspath(__file__))
+    external_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), f'../../'))
     parsers = glob(os.path.join(os.path.dirname(__file__), "parse_*.py")) + glob(os.path.join(external_path, "parse_*.py"))
     parsers = [re.sub(r"parse_(\w+).py", r"\g<1>", os.path.basename(x)) for x in parsers]
     composers = glob(os.path.join(os.path.dirname(__file__), "compose_*.py")) + glob(os.path.join(external_path, "compose_*.py"))
