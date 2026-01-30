@@ -84,7 +84,7 @@ class parse_xml(Parser):
             if not node.set_base_by_id(raw_base_id):
                 Log.fatal(f"Could not find base node {raw_base_id} of {raw_name}")
             else:
-                Log.info(f"Found instance {node.instance} of {raw_name} ({raw_base_id})")
+                Log.debug(f"Found instance {node.instance} of {raw_name} ({raw_base_id})")
         else:
             for element in xml_node:
                 if element.tag == "block":
@@ -134,7 +134,7 @@ class parse_xml(Parser):
             if not node.set_base_by_id(raw_base_id):
                 Log.fatal(f"Could not find base node of {node.get_name()}")
             else:
-                Log.info(f"Found instance {node.instance} of {node.get_name()}")
+                Log.debug(f"Found instance {node.instance} of {node.get_name()}")
 
 
         else:
@@ -193,7 +193,7 @@ class parse_xml(Parser):
             if not node.set_base_by_id(raw_base_id):
                 Log.fatal(f"Could not find base node of {node.get_name()}")
             else:
-                Log.info(f"Found instance {node.instance} of {node.get_name()}")
+                Log.debug(f"Found instance {node.instance} of {node.get_name()}")
 
         else:
             node.tags = self.get_child_value(xml_node, "tag", "strset", defaults.get("field_tag", set()))
@@ -253,7 +253,7 @@ class parse_xml(Parser):
             if not node.set_base_by_id(raw_base_id):
                 Log.fatal(f"Could not find base node of {node.get_name()}")
             else:
-                Log.info(f"Found instance {node.instance} of {node.get_name()}")
+                Log.debug(f"Found instance {node.instance} of {node.get_name()}")
 
         self.handle_instances(xml_node, node, instances, defaults, self.parse_choice)
 

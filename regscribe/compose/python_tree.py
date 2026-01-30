@@ -10,7 +10,6 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from functools import reduce
-from xml.dom import minidom
 
 import requests
 
@@ -85,7 +84,7 @@ class compose_python_tree(Composer):
         struct_text.add_pre(f"from regscribe.converter import Project, Block, Register, Field, Choice")
         self.eval_node(self.project, struct_text)
 
-        self.output_filename.parents[0].mkdir(parents=True, exist_ok=True)
+        # self.output_filename.parents[0].mkdir(parents=True, exist_ok=True)
         struct_text.write_to_file(self.output_filename)
 
    
@@ -104,10 +103,10 @@ class compose_python_tree(Composer):
             for attr_name, attr_value in attributes.items():
                 self.set_attribute(xml_attributes, f"{attr_name}", f"{attr_value}")
 
-    def eval_node(self, node, struct_text):
+    def eval_node(self, node : BaseNode, struct_text):
         Log.debug(f"Writing Node: {node.name}")
 
-        if not node.exclude:
+        if True: #not node.exclude:
 
             inst_type = f"{node.__class__.__name__}"
             doc = f'"""\n**{node.get_hier_name().replace('/', ' -> ')}**:\n\n    Type: {node.get_type_name()}\n'
@@ -128,7 +127,7 @@ class compose_python_tree(Composer):
                 # if not node.is_instance():
                 struct_text.add_pre(f"class {inst_type}({node.__class__.__name__}):")
 
-                for child in node.excluded + node.get_children():
+                for child in node.get_children(): # + node.excluded
                     child_text = self.text_helper()
                     self.eval_node(child, child_text)
                     struct_text.add_child(child_text)

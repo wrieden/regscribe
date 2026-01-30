@@ -785,7 +785,7 @@ class BaseNode:
                     field.related.append(f)
                     f.related.append(field)
 
-                    print(f'lookup {letter} {path} {lookup[letter]["field"].get_name()}')
+                    # print(f'lookup {letter} {path} {lookup[letter]["field"].get_name()}')
                     letter = chr(ord(letter) + 1)
 
             Log.debug(f"formula: {formula}")
@@ -821,7 +821,7 @@ class BaseNode:
 
             if field.formula != "$":
                 # expr_raw = sympy.solve(exprs, [symbol_common, lookup[letter_raw]["symbol"], lookup[letter_real]["symbol"]], dict=True)
-                print(field.formula)
+                # print(field.formula)
                 pass
 
             def rep(formula):
@@ -972,6 +972,7 @@ class Project(BaseNode):
 class Block(BaseNode):
     def __init__(self, parent, name=None, description=None, offset=None, visibility: Visibility = Visibility.PUBLIC, id: str = None, template: bool = False):
         BaseNode.__init__(self, parent=parent, name=name, description=description, offset=offset, visibility=visibility, id=id, template=template)
+        self.parent: Block | Project
 
     def __str__(self):
         return f"{self.name}"
@@ -997,6 +998,8 @@ class Register(BaseNode):
 
     def __init__(self, parent, name=None, description=None, offset=None, width=None, visibility: Visibility = Visibility.PUBLIC, id: str = None, template: bool = False):
         BaseNode.__init__(self, parent=parent, name=name, description=description, offset=offset, visibility=visibility, id=id, template=template)
+        self.parent: Block
+
         self._width = width
         self._address = None
         self._value = self.reset_value
@@ -1097,6 +1100,8 @@ class Field(BaseNode):
 
     def __init__(self, parent, name=None, description=None, offset=None, visibility: Visibility = Visibility.PUBLIC, omit=False, id: str = None, template: bool = False):
         BaseNode.__init__(self, parent=parent, name=name, description=description, offset=offset, visibility=visibility, id=id, template=template)
+        self.parent: Register
+        
         self.omit = omit
         self.formula_real = None
         self.formula_raw = None
@@ -1135,15 +1140,18 @@ class Field(BaseNode):
     #         offset = child.offset + 1
 
     def write(self, value):
+        Log.info(f"Writing value {value} to field {self.get_hier_name()}")
         val = self.parent.read()
         val = (val & ~self.mask) | ((value << self.offset) & self.mask)
         self.parent.write(val)
 
     def read(self):
+        Log.info(f"Reading value from field {self.get_hier_name()}")
         self.parent.read()
         return self.value
 
     def monitor(self, priority=1, task="default", duration=None, samples=None):
+        Log.info(f"Monitoring field {self.get_hier_name()}")
         self.get_parent(priority, task, duration, samples)
 
     def set_default_min_max(self):
@@ -1206,9 +1214,15 @@ class Field(BaseNode):
 class Choice(BaseNode):
     def __init__(self, parent, name=None, description=None, offset=None, visibility: Visibility = Visibility.PUBLIC, id: str = None, template: bool = False):
         BaseNode.__init__(self, parent, name, description=description, offset=offset, visibility=visibility, id=id, template=template)
-
+        self.parent: Field
+    
     def __str__(self):
         return f"{self.name}"
+    
+    def select(self):
+        Log.info(f"Selecting choice {self.name} for {self.parent.get_hier_name()}")
+        self.parent.write(self.offset)
+
 
 
 class Log:
@@ -1276,12 +1290,11 @@ class Composer:
 
 
 def main(cmdline=None):
-    print(os.path.abspath(__file__))
     external_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), f'../../'))
-    parsers = glob(os.path.join(os.path.dirname(__file__), "parse_*.py")) + glob(os.path.join(external_path, "parse_*.py"))
-    parsers = [re.sub(r"parse_(\w+).py", r"\g<1>", os.path.basename(x)) for x in parsers]
-    composers = glob(os.path.join(os.path.dirname(__file__), "compose_*.py")) + glob(os.path.join(external_path, "compose_*.py"))
-    composers = [re.sub(r"compose_(\w+).py", r"\g<1>", os.path.basename(x)) for x in composers]
+    parsers = glob(os.path.join(os.path.dirname(__file__), "parse", "*.py")) + glob(os.path.join(external_path, "parse", "*.py"))
+    parsers = [re.sub(r"(\w+).py", r"\g<1>", os.path.basename(x)) for x in parsers]
+    composers = glob(os.path.join(os.path.dirname(__file__), "compose", "*.py")) + glob(os.path.join(external_path, "compose", "*.py"))
+    composers = [re.sub(r"(\w+).py", r"\g<1>", os.path.basename(x)) for x in composers]
 
     argparser = argparse.ArgumentParser(add_help=False)
     group = argparser.add_argument_group("Generic Arguments")
@@ -1296,10 +1309,10 @@ def main(cmdline=None):
 
     # get parser arguments
 
-    if importlib.util.find_spec(f"regscribe.parse_{args.parser}") is not None:
-        parser_module = importlib.import_module(f"regscribe.parse_{args.parser}")
+    if importlib.util.find_spec(f"regscribe.parse.{args.parser}") is not None:
+        parser_module = importlib.import_module(f"regscribe.parse.{args.parser}")
     else:
-        spec = importlib.util.spec_from_file_location(f"parse_{args.parser}", os.path.abspath(os.path.join(external_path, f'parse_{args.parser}.py')))
+        spec = importlib.util.spec_from_file_location(f"parse_{args.parser}", os.path.abspath(os.path.join(external_path, 'parse', f'{args.parser}.py')))
         parser_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(parser_module)
 
@@ -1308,10 +1321,10 @@ def main(cmdline=None):
 
     # get composer arguments
     if args.composer != "project":
-        if importlib.util.find_spec(f"regscribe.compose_{args.composer}") is not None:
-            composer_module = importlib.import_module(f"regscribe.compose_{args.composer}")
+        if importlib.util.find_spec(f"regscribe.compose.{args.composer}") is not None:
+            composer_module = importlib.import_module(f"regscribe.compose.{args.composer}")
         else:
-            spec = importlib.util.spec_from_file_location(f"compose_{args.composer}", os.path.abspath(os.path.join(external_path, f'compose_{args.composer}.py')))
+            spec = importlib.util.spec_from_file_location(f"compose_{args.composer}", os.path.abspath(os.path.join(external_path, 'compose', f'{args.composer}.py')))
             composer_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(composer_module)
 
