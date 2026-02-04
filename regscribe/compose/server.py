@@ -87,12 +87,14 @@ class compose_server(Composer):
         # define routes that capture comm and project
         @app.get("/py/monitor_register")
         async def monitor_register(id: str = "", prio: int = 1, endpoint: str = "default"):
-            node: Register = project.get_child(id)
-            if not isinstance(node, Register):
+            reg: Register = project.get_child(id)
+            if isinstance(reg, Register):
+                reg.monitor(priority=prio, task=endpoint)
+                return Response(status_code=status.HTTP_200_OK)
+            else:
                 return Response(content="id not found", status_code=status.HTTP_404_NOT_FOUND)
-            comm.regmon.add_listener(node, endpoint, prio)
-            Log.debug(comm.regmon.monitored)
-            return Response(status_code=status.HTTP_200_OK)
+            # comm.regmon.add_listener(node, endpoint, prio)
+            # Log.debug(comm.regmon.monitored)
 
         @app.get("/py/write_register")
         async def write_register(id: str = "", value: int = 0):

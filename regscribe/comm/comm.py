@@ -11,17 +11,16 @@ class RegisterMonitor:
         self.lock = Lock()
 
     def add_listener(self, node, name, prio, samples=None, duration=None):
-        self.lock.acquire()
         if prio == 0:
             self.remove_listener(node, name)
         else:
-
+            self.lock.acquire()
             mon = self.monitored.pop(node, Monitored(node))
             mon.add_listener(name, prio)
             self.monitored[node] = mon
 
             self.it = iter(self.monitored.values())
-        self.lock.release()
+            self.lock.release()
 
 
     def remove_listener(self, node, name):
