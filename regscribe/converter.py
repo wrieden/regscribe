@@ -13,6 +13,8 @@ from functools import partial
 from threading import Event
 from typing import Optional
 from glob import glob
+import dill as pickle
+from pathlib import Path
 
 import math
 from math import log, log10, log2, ceil, floor
@@ -877,7 +879,11 @@ class BaseNode:
     def remove_child(self, child):
         child = [child] if not isinstance(child, list) else child
         for c in child:
-            self.children.remove(c)
+            if c in self.children:
+                self.children.remove(c)
+            else:
+                pass
+                # Log.debug(f"remove_child: {self.get_hier_name()} has no child {c.get_hier_name()}")
 
     def add_instance(self, instance):
         instance = [instance] if not isinstance(instance, list) else instance
@@ -891,7 +897,10 @@ class BaseNode:
         for child in self.templates:
             child.calculate_offsets()
 
-    def check_valid(self, depth=1, demote_name_check=False):
+    def check_valid(self, depth=1):
+        if (self.get_type() in [Project]) and not self.get_children(depth=-1, child_type=Register):
+            Log.fatal(f"Project has not a single register!")
+
         if (not self.get_project().address_width) or (not (0 < self.get_project().address_width <= 32)):
             Log.fatal(f"Address width is invalid! (width: {self.get_project().address_width})")
         
@@ -903,14 +912,14 @@ class BaseNode:
             Log.fatal(f"Name is None! ({name})")
         # elif not re.match(r"^([A-Z]|{[^}]})(?:_?(?:[A-Z0-9]|{[^}]}))*$", self.get_raw_name()):
         elif not re.match(r"^[A-Z](_?[A-Z0-9])*$", self.get_name()):
-            Log.log([logging.FATAL, logging.ERROR][demote_name_check], f"Name is invalid ({self.get_raw_name()}, ({name}))")
+            Log.fatal(f"Name is invalid ({self.get_raw_name()}, ({name}))", "NAME_CHECK")
         if self.id is None:
             Log.fatal(f"ID is None! ({name})")
 
-        if self.description in [None, ""]:
-            Log.log(logging.ERROR if self.get_type() in [Choice, Field] else logging.INFO, f"Description is missing! ({name})")
+        if (self.description in [None, ""]):
+            Log.log(logging.ERROR if self.get_type() in [Choice, Field] else logging.INFO, f"Description is missing! ({name})", "DESCRIPTION")
         if self.description == self.get_name():
-            Log.warn(f"Useless description, deleting! ({name})")
+            Log.warn(f"Useless description, deleting! ({name})", "DESCRIPTION")
             self.description = ""
 
         if not isinstance(self.offset, int):
@@ -920,7 +929,7 @@ class BaseNode:
 
         if depth != 1:
             for child in self.get_children():
-                child.check_valid(depth=depth - 1, demote_name_check=demote_name_check)
+                child.check_valid(depth=depth - 1)
 
         if self.get_type() in [Field] and self.has_children() and self.get_child_by_offset(self.reset_value) is None:
             Log.fatal(f"Default value is not part of choices! ({name})")
@@ -1012,7 +1021,7 @@ class Register(BaseNode):
         return d
 
     @property
-    def address(self):
+    def address(self) -> int:
         if self._address is None:
             return self.get_offset(-1)
         else:
@@ -1023,7 +1032,7 @@ class Register(BaseNode):
         self._address = value
 
     @property
-    def value(self):
+    def value(self) -> int:
         return self._value
 
     @value.setter
@@ -1045,7 +1054,7 @@ class Register(BaseNode):
         #     child.set_value((value >> child.offset) & ((1 << child.width)-1))
 
     @property
-    def reset_value(self):
+    def reset_value(self) -> int:
         value = 0
         for child in self.get_children():
             value |= (child.reset_value & ((1 << 32) - 1)) << child.offset
@@ -1060,11 +1069,14 @@ class Register(BaseNode):
     def write(self, value):
         Log.fatal("Register write method is not defined!")
 
-    def read(self):
+    def read(self) -> int:
         Log.fatal("Register read method is not defined!")
 
     def monitor(self, priority=1, task="default", duration=None, samples=None):
         Log.fatal("Register monitor method is not defined!")
+
+    def stop_monitor(self, task=None):
+        Log.fatal("Register stop monitor method is not defined!")
 
     def __str__(self):
         return f"{self.name}"
@@ -1154,6 +1166,48 @@ class Field(BaseNode):
         Log.info(f"Monitoring field {self.get_hier_name()}")
         self.get_parent(priority, task, duration, samples)
 
+
+    def wait(self, above=None, below=None, equal=None, delta=None, abs_delta=None):
+        initial_value = self.value
+
+        if equal is not None:
+            if above is None and below is None:
+                above = equal-1
+                below = equal+1
+            else:
+                Log.fatal("wait equal cannot be combined with above/below")
+        if delta is not None:
+            if above is None and below is None:
+                if delta <= 0:
+                    above = initial_value + delta - 1
+                else:
+                    below = initial_value - delta + 1
+            else:
+                Log.fatal("wait delta cannot be combined with above/below")
+        if abs_delta is not None:
+            if above is None and below is None:
+                above = initial_value + delta - 1
+                below = initial_value - delta + 1
+            else:
+                Log.fatal("wait abs_delta cannot be combined with above/below")
+        
+        if above is not None and below is None:
+            below = 1<<self.width
+        elif below is not None and above is None:
+            above = -(1<<self.width)-1
+
+        while True:
+            self.parent._changed.wait(timeout=0.1)
+            value = self.value
+
+            if above is not None and below is not None:
+                if (value > above) and (value < below):
+                    return
+                elif (above > below) and ((value > above) or (value < below)):
+                    return
+
+
+
     def set_default_min_max(self):
         self.min = [0, -(1 << (self.width - 1))][self.encoding.signed()]
         self.max = (1 << (self.width - self.encoding.signed())) - 1
@@ -1226,12 +1280,25 @@ class Choice(BaseNode):
 
 
 class Log:
+    ignores: list = []
+    demotes: list = []
+
     @staticmethod
-    def setup(log_level):
+    def setup(log_level, args=None):
+        for name,val in args.__dict__.items():
+            if name.startswith("ignore_") and val:
+                Log.ignores.append(name.replace("ignore_", "").upper())
+            if name.startswith("demote_") and val:
+                Log.demotes.append(name.replace("demote_", "").upper())
         logging.basicConfig(stream=sys.stdout, level=log_level, format="%(levelname)8s: %(message)s")
 
     @staticmethod
-    def log(severity, msg):
+    def log(severity, msg, type = None):
+        if type in Log.ignores:
+            return
+        elif type in Log.demotes:
+            severity = {logging.FATAL: logging.ERROR, logging.ERROR: logging.WARNING, logging.WARNING: logging.INFO, logging.INFO: logging.DEBUG}.get(severity, severity)
+         
         logging.log(severity, msg)
         if severity >= logging.FATAL:
             if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
@@ -1242,23 +1309,23 @@ class Log:
 
     @staticmethod
     def fatal(msg):
-        Log.log(logging.FATAL, msg)
+        Log.log(logging.FATAL, msg, type = None)
 
     @staticmethod
     def error(msg):
-        Log.log(logging.ERROR, msg)
+        Log.log(logging.ERROR, msg, type = None)
 
     @staticmethod
     def warn(msg):
-        Log.log(logging.WARN, msg)
+        Log.log(logging.WARN, msg, type = None)
 
     @staticmethod
     def info(msg):
-        Log.log(logging.INFO, msg)
+        Log.log(logging.INFO, msg, type = None)
 
     @staticmethod
     def debug(msg):
-        Log.log(logging.DEBUG, msg)
+        Log.log(logging.DEBUG, msg, type = None)
 
 
 class Parser:
@@ -1289,7 +1356,11 @@ class Composer:
         Log.fatal(f"Selected Composer is missing compose")
 
 
-def main(cmdline=None):
+
+def regscribe(cmdline: list[str], parser="xml", composer="project", dump=None):
+    return main(cmdline, default_parser=parser, default_composer=composer, default_dump=dump)
+
+def main(cmdline=None, default_composer="xml", default_parser="xml", default_dump=None):
     external_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), f'../../'))
     parsers = glob(os.path.join(os.path.dirname(__file__), "parse", "*.py")) + glob(os.path.join(external_path, "parse", "*.py"))
     parsers = [re.sub(r"(\w+).py", r"\g<1>", os.path.basename(x)) for x in parsers]
@@ -1298,21 +1369,29 @@ def main(cmdline=None):
 
     argparser = argparse.ArgumentParser(add_help=False)
     group = argparser.add_argument_group("Generic Arguments")
-    group.add_argument("-p", "--parser", choices=parsers, default="xml", help="Selects the used parser")
-    group.add_argument("-c", "--composer", choices=composers+["project"], default="xml", help="Selects the used composer")
+    group.add_argument("-p", "--parser", choices=parsers, default=default_parser, help="Selects the used parser")
+    group.add_argument("-c", "--composer", choices=composers+["project"], default=default_composer, help="Selects the used composer")
     group.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity level")
     group.add_argument("--demote_name_check", action="store_true", help="Accept invalid names")
     group.add_argument("--skip_validity_check", action="store_true", help="Skip validity checks, may lead to broken outputs or crashes")
+    group.add_argument("--ignore_description", action="store_true", help="Ignore missing descriptions")
+    group.add_argument("--dump", type=Path, default=default_dump, help="Dump the parsed project to a pickle file for later reuse, creates file if not existing or outdated")
 
     args, remaining = argparser.parse_known_args(cmdline)
-    Log.setup([logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 3)])
+    arg_composer:str = args.composer
+    arg_parser:str = args.parser
+    arg_verbose:int = args.verbose
+    arg_skip_validity_check:bool = args.skip_validity_check
+    arg_dump:str = args.dump
+
+    Log.setup([logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG][min(arg_verbose, 3)], args)
 
     # get parser arguments
 
-    if importlib.util.find_spec(f"regscribe.parse.{args.parser}") is not None:
-        parser_module = importlib.import_module(f"regscribe.parse.{args.parser}")
+    if importlib.util.find_spec(f"regscribe.parse.{arg_parser}") is not None:
+        parser_module = importlib.import_module(f"regscribe.parse.{arg_parser}")
     else:
-        spec = importlib.util.spec_from_file_location(f"parse_{args.parser}", os.path.abspath(os.path.join(external_path, 'parse', f'{args.parser}.py')))
+        spec = importlib.util.spec_from_file_location(f"parse_{arg_parser}", os.path.abspath(os.path.join(external_path, 'parse', f'{arg_parser}.py')))
         parser_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(parser_module)
 
@@ -1320,11 +1399,11 @@ def main(cmdline=None):
     parse_parents = [parser.get_argparse()]
 
     # get composer arguments
-    if args.composer != "project":
-        if importlib.util.find_spec(f"regscribe.compose.{args.composer}") is not None:
-            composer_module = importlib.import_module(f"regscribe.compose.{args.composer}")
+    if arg_composer != "project":
+        if importlib.util.find_spec(f"regscribe.compose.{arg_composer}") is not None:
+            composer_module = importlib.import_module(f"regscribe.compose.{arg_composer}")
         else:
-            spec = importlib.util.spec_from_file_location(f"compose_{args.composer}", os.path.abspath(os.path.join(external_path, 'compose', f'{args.composer}.py')))
+            spec = importlib.util.spec_from_file_location(f"compose_{arg_composer}", os.path.abspath(os.path.join(external_path, 'compose', f'{arg_composer}.py')))
             composer_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(composer_module)
 
@@ -1349,14 +1428,14 @@ def main(cmdline=None):
     # eval args
     Log.info(f"Input Arguments: {args}")
 
-    # eval common args...
+    # eval common arg_..
     try:
-        if args.input.startswith("http"):
-            Log.info(f"Downloading: {args.input}")
-            r = requests.get(args.input, allow_redirects=True)
+        if arg_input.startswith("http"):
+            Log.info(f"Downloading: {arg_input}")
+            r = requests.get(arg_input, allow_redirects=True)
             if r.ok:
                 open(".converter_input", "wb").write(r.content)
-                args.input = ".converter_input"
+                arg_input = ".converter_input"
             else:
                 Log.fatal(f"Download failed: status code {r.status_code}\n{r.text}")
     except Exception:
@@ -1364,16 +1443,43 @@ def main(cmdline=None):
 
     # Parse
     parser.set_args(args)
-    project: Project = parser.parse()
-    project.add_children_as_attributes()
-    project.update_register_addresses()
 
-    if not args.skip_validity_check:
-        if not project.get_children(depth=-1, child_type=Register):
-            Log.fatal(f"Project has not a single register!")
-        project.check_valid(depth=-1, demote_name_check=args.demote_name_check)
+    project: Project | None = None
 
-    if args.composer == "project":
+    pickle_files = glob(os.path.join(external_path, "parse" ,"*.py"))
+    pickle_files += glob(os.path.join(os.path.dirname(__file__), "parse" ,"*.py"))
+    pickle_files += glob(os.path.join(external_path, "compose" ,"*.py"))
+    pickle_files += glob(os.path.join(os.path.dirname(__file__), "compose" ,"*.py"))
+    pickle_files += glob(os.path.join(os.path.dirname(__file__), "converter.py"))
+    pickle_args = f"{args.__dict__}"
+    pickle_timestamp = f"{sum([os.path.getmtime(os.path.abspath(os.path.realpath(f))) for f in pickle_files])}"
+
+    if arg_dump and os.path.exists(arg_dump):
+
+        with open(arg_dump, 'rb') as projfile:
+            project: Project = pickle.load(projfile)
+            if (project.pickle_args == pickle_args) and (project.pickle_timestamp == pickle_timestamp):
+                Log.info(f"Using cached project from pickle dump {arg_dump}")
+            else:
+                Log.info(f"Pickle dump {arg_dump} is outdated, reparsing")
+                project = None
+    
+    if not project:
+        project: Project = parser.parse()
+        project.add_children_as_attributes()
+        project.update_register_addresses()
+        project.pickle_args = pickle_args
+        project.pickle_timestamp = pickle_timestamp
+        
+        if not arg_skip_validity_check:
+            project.check_valid(depth=-1)
+        if arg_dump is not None:
+            with open(arg_dump, 'wb') as projfile:
+                pickle.dump(project, projfile, pickle.HIGHEST_PROTOCOL)
+                Log.info(f"Dumped project to pickle file {arg_dump}")
+    
+
+    if arg_composer == "project":
         return project
 
     # Composer

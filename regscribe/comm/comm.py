@@ -1,47 +1,54 @@
-from regscribe.converter import Log
+from regscribe.converter import Log, Register
 import time
-from collections import deque
-
+from queue import SimpleQueue
+from threading import Lock
 
 
 class RegisterMonitor:
     def __init__(self):
         self.monitored = dict()
         self.it = iter(self.monitored.values())
+        self.lock = Lock()
 
-
-    def add_listener(self, node, name, prio):
+    def add_listener(self, node, name, prio, samples=None, duration=None):
+        self.lock.acquire()
         if prio == 0:
             self.remove_listener(node, name)
-            return
+        else:
 
-        mon = self.monitored.pop(node, Monitored(node))
-        mon.add_listener(name, prio)
-        self.monitored[node] = mon
+            mon = self.monitored.pop(node, Monitored(node))
+            mon.add_listener(name, prio)
+            self.monitored[node] = mon
 
-        self.it = iter(self.monitored.values())
+            self.it = iter(self.monitored.values())
+        self.lock.release()
 
 
     def remove_listener(self, node, name):
+        self.lock.acquire()
         mon = self.monitored.pop(node, Monitored(node))
         mon.remove_listener(name)
         if mon.has_listener():
             self.monitored[node] = mon
 
         self.it = iter(self.monitored.values())
+        self.lock.release()
 
 
-    def get_next(self):
+    def get_next(self) -> Register | None: # may be called in a thread...
+        self.lock.acquire()
         while True:
             mon = next(self.it, None)
             if mon is None:
                 self.it = iter(self.monitored.values())
                 mon = next(self.it, None)
             if mon is None:
+                self.lock.release()
                 return None
 
             if mon.counter <= 1:
                 mon.reset_counter()
+                self.lock.release()
                 return mon.node
             else:
                 mon.counter -= 1
@@ -60,7 +67,10 @@ class Monitored:
         self.counter = self.lowest_priority()
 
     def remove_listener(self, name):
-        self.priority.pop(name, None)
+        if name is None:
+            self.priority.clear()
+        else:
+            self.priority.pop(name, None)
 
     def lowest_priority(self):
         return min(self.priority.values())
@@ -138,7 +148,7 @@ class ReadRequest:
 
 
 class ReadResponse:
-    def __init__(self, bytes):
+    def __init__(self, bytes: bytes | bytearray):
         resp = bytearray(bytes)
         self.sync = resp[0] & 0x03
         self.time = (resp[0] >> 2) & 0x0F
@@ -148,89 +158,52 @@ class ReadResponse:
     def __str__(self):
         return f"0x{self.addr:04X} <- 0x{self.value:08X}, {self.time}t, {self.sync}s"
 
+    def __bytes__(self):
+        return bytes(
+            bytearray(
+                [
+                    ((self.sync & 0x03) << 6) | ((self.time & 0x0F) << 2) | ((self.addr & 0x03) << 6),
+                    (self.addr >> 2) & 0xFF,
+                    (self.value >> 0) & 0xFF,
+                    (self.value >> 8) & 0xFF,
+                    (self.value >> 16) & 0xFF,
+                    (self.value >> 24) & 0xFF,
+                ]
+            )
+        )
+
 
 class RequestedValue:
-    def __init__(self, addr, node, time):
-        self.addr = addr
-        self.node = node
+    def __init__(self, request, time):
+        self.addr = request.addr
+        # self.node = node
         self.time = time
 
 
 class RequestedValues:
 
     def __init__(self):
-        self.requests = dict()
-        self.active_requests = 0
-        self.reqorder = deque()
+        self.requests : SimpleQueue[RequestedValue] = SimpleQueue()
 
-    def add(self, addr, node, t=None):
-        if t is None:
-            t = time.time_ns()
-        req = RequestedValue(addr, node, t)
-        self.reqorder.append(req)
-        # if addr in self.requests:
-        #     self.requests[addr].append(req)
-        # else:
-        #     self.requests[addr] = [req]
-        self.active_requests += 1
+    def add_request(self, request: WriteRequest | ReadRequest, t=None):
+        if isinstance(request, ReadRequest):
+            if t is None:
+                t = time.time_ns()
+            self.requests.put(RequestedValue(request, t))
 
-    def remove(self, addr):
+    def received_response(self, response: ReadResponse):
+        req = self.requests.get()
+        if req.addr != response.addr:
+            Log.warn(f"Received response for address 0x{response.addr:04X} but expected 0x{req.addr:04X}")
+        else:
+            Log.debug(f"Matched response for address 0x{response.addr:04X}")
 
-        try:
-            for req in self.reqorder:
-                if req.addr == addr:
-                    self.reqorder.remove(req)
-                    return req.node
-
-        # try:
-        #     node = self.requests[addr].pop().node
-        #     if (len(self.requests[addr]) == 0):
-        #         del self.requests[addr]
-        #     self.active_requests-=1
-        except Exception as e:
-            Log.info(f"Unable to resolve id {addr} to a node!\n {e}")
-            return None
-
-        # return node
-
-    def remove_old_requests(self, time):
-        for req in self.reqorder:
-            if req.time < time:
-                Log.info(f"Removed request for {req.addr} from time {req.time} at {time}")
-                self.reqorder.remove(req)
-                return
-
-        # try:
-        #     node = self.requests[addr].pop().node
-        #     if (len(self.requests[addr]) == 0):
-        #         del self.requests[addr]
-        #     self.active_requests-=1
-
-        # except Exception as e:
-        #     Log.info(f'Unable to resolve id {addr} to a node!\n {e}')
-        #     node = None
-
-        # for key in list(self.requests.keys()):
-        #     for req in reversed(self.requests[key]):
-        #         if req.time < time:
-        #             self.requests[key].remove(req)
-        #             self.active_requests-=1
-        #             Log.info(f'Reqeust id {key} timed out!')
-        #     if(len(self.requests[key])==0):
-        #         del self.requests[key]
-
-    def num(self):
-        return len(self.reqorder)
-
-        return self.active_requests
-        num = 0
-        for reqs in self.requests.values():
-            num += len(reqs)
-        return num
+    def open_requests(self):
+        return self.requests.qsize()
 
     def clear(self):
-        self.reqorder.clear()
-        return
-
-        self.requests = dict()
-        self.active_requests = 0
+        try:
+            while True:
+                self.requests.get(block=False)
+        except:
+            pass

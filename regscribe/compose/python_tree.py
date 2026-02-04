@@ -27,17 +27,23 @@ def get_composer():
 
 
 class compose_python_tree(Composer):
-    def __init__(self, output_filename: Path):
+    def __init__(self, output_filename: Path, only_if_changed: bool = False, exclude_types: bool = False):
         self.output_filename = output_filename
+        self.only_if_changed = only_if_changed
+        self.exclude_types = exclude_types
 
     def get_argparse(self):
         argparser = argparse.ArgumentParser(add_help=False)
         group = argparser.add_argument_group("XML Builder Arguments")
         group.add_argument("-o", "--output", type=Path, default="out.py", help="Output python file")
+        group.add_argument("--only_if_changed", action="store_true", help="Only write output file if content has changed")
+        group.add_argument("--exclude_types", action="store_true", help="Do not inherit from the actual classes")
         return argparser
 
     def set_args(self, args):
         self.output_filename: Path = args.output
+        self.only_if_changed: bool = args.only_if_changed
+        self.exclude_types: bool = args.exclude_types
 
     class text_helper(object):
         def __init__(self):
@@ -55,12 +61,12 @@ class compose_python_tree(Composer):
             self.text.append(child)
 
         def get(self, indent=""):
-            text = "" if self.text_pre == "" else re.sub(r"^.", f"{indent}\g<0>", self.text_pre, flags=re.MULTILINE)
+            text = "" if self.text_pre == "" else re.sub(r"^.", indent+r"\g<0>", self.text_pre, flags=re.MULTILINE)
 
             for child in self.text:
                 text += child.get(f"{indent}    ")
 
-            text += "" if self.text_post == "" else re.sub(r"^.", f"{indent}\g<0>", self.text_post, flags=re.MULTILINE)
+            text += "" if self.text_post == "" else re.sub(r"^.", indent+r"\g<0>", self.text_post, flags=re.MULTILINE)
             return text
 
         def write_to_file(self, name, indent="    "):
@@ -74,12 +80,20 @@ class compose_python_tree(Composer):
 
         self.project = project
 
+        expected_line = f"# Generate args: {project.pickle_args}, Generate time: {project.pickle_timestamp}"
+        if self.only_if_changed and os.path.exists(self.output_filename):
+            with open(self.output_filename, "r") as f:
+                if expected_line == f.readlines(0)[0].strip():
+                    Log.info(f"python file is up to date, skipping")
+                    return
+
         self.default_register_offset = 0
         self.default_field_offset = 0
         self.default_choice_offset = 0
 
         struct_text = dict()
         struct_text = self.text_helper()
+        struct_text.add_pre(f"{expected_line}")
         struct_text.add_pre(f"from __future__ import annotations")
         struct_text.add_pre(f"from regscribe.converter import Project, Block, Register, Field, Choice")
         self.eval_node(self.project, struct_text)
@@ -125,7 +139,7 @@ class compose_python_tree(Composer):
                 base_type = f"t{node.get_base().get_name_without_instance()}"
 
                 # if not node.is_instance():
-                struct_text.add_pre(f"class {inst_type}({node.__class__.__name__}):")
+                struct_text.add_pre(f"class {inst_type}" + (":" if self.exclude_types else f"({node.__class__.__name__}):"))
 
                 for child in node.get_children(): # + node.excluded
                     child_text = self.text_helper()
@@ -140,6 +154,8 @@ class compose_python_tree(Composer):
                     struct_text.add_post(doc)
 
             struct_text.add_post(f"{node.get_name()} : {inst_type} = None")
+            # struct_text.add_post(f"{node.get_name()}" + ("" if self.exclude_types else f" : {inst_type}") + " = None")
+
             struct_text.add_post(doc)
 
         if isinstance(node, Project):
