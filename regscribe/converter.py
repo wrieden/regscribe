@@ -951,7 +951,7 @@ class BaseNode:
 
 class Project(BaseNode):
     def __init__(self, name, description=None, offset=None, address_width=None):
-        BaseNode.__init__(self, parent=None, name=name, description=description, offset=offset)
+        BaseNode.__init__(self, parent=None, name=name, description=description, offset=offset, visibility=Visibility.PUBLIC)
 
         self._regmap: dict[int, "Register"] = dict()
         self.address_width : int | None = address_width

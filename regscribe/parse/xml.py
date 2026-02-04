@@ -63,7 +63,7 @@ class parse_xml(Parser):
         raw_name = self.get_attribute_value(xml_node, "name", "str", "").strip()
         Log.debug(f"Parsing Address Block: {raw_name}")
 
-        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", Visibility.PUBLIC)
+        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", parent.visibility)
         raw_offset = self.get_attribute_value(xml_node, "offset", "int", None, logging.NOTSET)
         raw_instance = self.get_attribute_value(xml_node, ["instance", "inst"], "str", None, logging.NOTSET)
         raw_base_id = self.get_attribute_value(xml_node, "base", "str", None, logging.NOTSET)
@@ -106,7 +106,7 @@ class parse_xml(Parser):
         raw_name = self.get_attribute_value(xml_node, "name", "str", "").strip()
         Log.debug(f"Parsing Register: {raw_name}")
 
-        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", Visibility.PUBLIC)
+        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", parent.visibility)
         raw_offset = self.get_attribute_value(xml_node, "offset", "int", None, logging.NOTSET)
         raw_instance = self.get_attribute_value(xml_node, ["instance", "inst"], "str", None, logging.NOTSET)
         raw_id = self.get_attribute_value(xml_node, "id", "str", None, logging.NOTSET)
@@ -172,7 +172,7 @@ class parse_xml(Parser):
             i = self.parse_instances(self.get_attribute_value(c, ["instance", "inst"], "str", None, logging.NOTSET))
             num_choices += 1 if not i else len(i)
 
-        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", Visibility.PUBLIC)
+        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", parent.visibility)
         raw_omit = self.get_attribute_value(xml_node, "omit", "bool", False)
         raw_offset = self.get_attribute_value(xml_node, "offset", "int", None, logging.NOTSET)
         raw_description = self.get_child_or_attribute_value(xml_node, ["description", "desc"], "str", defaults.get("field_desc", defaults.get("field_description", "")))
@@ -231,7 +231,7 @@ class parse_xml(Parser):
         raw_name = self.get_attribute_value(xml_node, "name", "str", "").strip()
         Log.debug(f"Parsing Field: {raw_name}")
 
-        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", Visibility.PUBLIC)
+        raw_visibility = self.get_attribute_value(xml_node, "visibility", "Visibility", parent.visibility)
         raw_offset = self.get_attribute_value(xml_node, "offset", "int", None, logging.NOTSET)
         raw_instance = self.get_attribute_value(xml_node, ["instance", "inst"], "str", None, logging.NOTSET)
         raw_id = self.get_attribute_value(xml_node, "id", "str", None, logging.NOTSET)
