@@ -213,15 +213,18 @@ class parse_xml(Parser):
             node.read_strobe = self.get_attribute_value(xml_node, "read_strobe", "ReadStrobe", defaults.get("field_read_strobe", ReadStrobe.NONE))
 
             node.mantissa = self.get_attribute_value(xml_node, "mantissa", "int", node.width)
-            node.min = self.get_attribute_value(xml_node, "min", "int", -(1 << (node.width - 1)) if node.encoding.signed() else 0)
-            node.max = self.get_attribute_value(xml_node, "max", "int", (1 << (node.width - 1)) - 1 if node.encoding.signed() else (1 << (node.width)) - 1)
-
-            node.reset_value = self.get_attribute_value(xml_node, "reset", "int", defaults.get("field_reset", "0"), logging.FATAL, {"min": node.min, "max": node.max})
             node.logic_access = self.get_attribute_value(xml_node, "logic_access", "LogicAccess", defaults.get("field_logic_access", LogicAccess.R if node.access.can_write() else LogicAccess.RW))
 
             # node.set_attributes(raw_parameter_custom)
             for xml_choice in xml_node.findall(f"./choice"):
                 self.parse_choice(xml_choice, node)
+            
+            min_choice = min([choice.offset for choice in node.children], default=0)
+            max_choice = max([choice.offset for choice in node.children], default=(1 << (node.width)) - 1)
+
+            node.min = self.get_attribute_value(xml_node, "min", "int", -(1 << (node.width - 1)) if node.encoding.signed() else min_choice)
+            node.max = self.get_attribute_value(xml_node, "max", "int", (1 << (node.width - 1)) - 1 if node.encoding.signed() else max_choice)
+            node.reset_value = self.get_attribute_value(xml_node, "reset", "int", defaults.get("field_reset", "0"), logging.FATAL, {"min": node.min, "max": node.max})
 
         self.handle_instances(xml_node, node, instances, defaults, self.parse_field)
 

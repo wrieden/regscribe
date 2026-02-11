@@ -301,15 +301,15 @@ class compose_sv(Composer):
 
 
                 if field.offset != bitpos:
-                    fieldstring = f', {field.offset-bitpos}\'b0' + fieldstring
-                    fieldstring_read_enable = f', {field.offset-bitpos}\'b0' + fieldstring_read_enable
+                    fieldstring = f', {field.offset-bitpos}\'d0' + fieldstring
+                    fieldstring_read_enable = f', {field.offset-bitpos}\'d0' + fieldstring_read_enable
                 fieldstring = f', {field_hiername}' + fieldstring
-                fieldstring_read_enable = (f', {field.read_enable} ? {field_hiername} : {field.width}\'b0' if field.read_enable else  f', {field_hiername}') + fieldstring_read_enable
+                fieldstring_read_enable = (f', {field.read_enable} ? {field_hiername} : {field.width}\'d0' if field.read_enable else  f', {field_hiername}') + fieldstring_read_enable
                 bitpos = field.offset+field.width
 
             if register.width != bitpos:
-                fieldstring = f', {register.width-bitpos}\'b0' + fieldstring
-                fieldstring_read_enable = f', {register.width-bitpos}\'b0' + fieldstring_read_enable
+                fieldstring = f', {register.width-bitpos}\'d0' + fieldstring
+                fieldstring_read_enable = f', {register.width-bitpos}\'d0' + fieldstring_read_enable
                     
             out.add(f'// Build Register')           
             declare_signal(register, "reg", assign = "{ " + fieldstring[2:] + " }")
