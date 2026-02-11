@@ -219,6 +219,7 @@ class parse_xml(Parser):
             for xml_choice in xml_node.findall(f"./choice"):
                 self.parse_choice(xml_choice, node)
             
+            node.calculate_offsets()
             min_choice = min([choice.offset for choice in node.children], default=0)
             max_choice = max([choice.offset for choice in node.children], default=(1 << (node.width)) - 1)
 
