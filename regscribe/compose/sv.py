@@ -263,14 +263,14 @@ class compose_sv(Composer):
                         
                     if field.logic_access.write_access() in [LogicAccess.C]:
                         field_clear = declare_signal(field, "clear", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{com_acc}({field_clear} ? '0 : {field_name_q})")
+                        field_name_d = declare_signal(field, "d", f"{field_clear}? '0 : ({com_acc}({field_name_q}))")
                     elif field.logic_access.write_access() in [LogicAccess.S]:
                         field_set = declare_signal(field, "set", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{com_acc}({field_set} ? '1 : {field_name_q})")
+                        field_name_d = declare_signal(field, "d", f"{field_set} ? '1 : ({com_acc}({field_name_q}))")
                     elif field.logic_access.write_access() in [LogicAccess.SC]:
                         field_clear = declare_signal(field, "clear", type='logic', width=1)
                         field_set = declare_signal(field, "set", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{com_acc}({field_clear} ? '0 : ({field_set} ? '1 : {field_name_q}))")
+                        field_name_d = declare_signal(field, "d", f"{field_clear} ? '0 : ({field_set} ? '1 : {com_acc}({field_name_q}))")
                     elif field.logic_access.write_access() in [LogicAccess.U]:
                         field_value = declare_signal(field, "value", type='logic')
                         field_update = declare_signal(field, "update", type='logic', width=1)
