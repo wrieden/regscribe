@@ -138,21 +138,38 @@ class LogicAccess(str, Enum):
     # When adding new modes follow the sheme:
     # R,S,C,U  type of access (Read, Set, Clear, Update)
     # A        modifier (Asynchronous)
+    # priority is determined by order of letters, eg for SC, set takes priority over clear, for CS clear takes priority over set
 
     NONE = ""  # no internal access...
     R = "r"  # only read access
 
     W = "w"  # write signal (if register is R, )
-    S = "s"  # set signal
-    C = "c"  # clear signal
-    SC = "sc"  # clear and set signal
-    U = "u"  # logic write port (write strobe + level)
+    WS = "ws"  # set signal
+    SW = "sw"  # set signal
+    WC = "wc"  # clear signal
+    CW = "cw"  # clear signal
+    WSC = "wsc"  # clear and set signal (set takes priority over clear)
+    WCS = "wcs"  # clear and set signal (clear takes priority over set)
+    SWC = "swc"  # clear and set signal (set takes priority over clear)
+    CWS = "cws"  # clear and set signal (clear takes priority over set)
+    SCW = "scw"  # clear and set signal (set takes priority over clear)
+    CSW = "csw"  # clear and set signal (clear takes priority over set)
+    WU = "wu"  # logic write port (write strobe + level)
+    UW = "uw"  # logic write port (write strobe + level)
 
     RW = "rw"  # readwrite signal (only if no external write access)
-    RS = "rs"  # read and set signal
-    RC = "rc"  # read and clear signal
-    RSC = "rsc"  # read and clear and set signal
-    RU = "ru"  # read and logic write port (write strobe + level)
+    RWS = "rws"  # read and set signal
+    RSW = "rsw"  # read and set signal
+    RWC = "rwc"  # read and clear signal
+    RCW = "rcw"  # read and clear signal
+    RWSC = "rwsc"  # read and clear and set signal (set takes priority over clear)
+    RWCS = "rwcs"  # read and clear and set signal (clear takes priority over set)
+    RSWC = "rswc"  # read and clear and set signal (set takes priority over clear)
+    RCWS = "rcws"  # read and clear and set signal (clear takes priority over set)
+    RSCW = "rscw"  # read and clear and set signal (set takes priority over clear)
+    RCSW = "rcsw"  # read and clear and set signal (clear takes priority over set)
+    RWU = "rwu"  # read and logic write port (write strobe + level)
+    RUW = "ruw"  # read and logic write port (write strobe + level)
     
     RCU = "rcu"  # read and clear signal
     RSU = "rsu"  # read and clear signal

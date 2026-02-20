@@ -232,8 +232,7 @@ class compose_sv(Composer):
                 field_read_access = declare_signal(field, "read_access", f'{reg_read_access}', 1, assign_if=field.read_enable)
                 field_write_access = declare_signal(field, "write_access", f"{reg_write_access}{'' if acc is None else f' && ({field_write_data} == \'{acc})'}", 1, assign_if=field.write_enable)
                 
-                val = {Access.W: field_write_data, Access.WC: "'0", Access.WS: "'1", Access.WT: f"~{field_write_data}"}[field.access.write_value()]
-                com_acc = f"{field_write_access} ? {val} : "
+  
 
                 out.add(f'// Generic - Register: {register_hiername}{to_range(field.msb, field.lsb)} (0x{register.address:08X})<br>Field: {field.get_name()}<br>Access: {field.access}<br>Logic Access: {field.logic_access}<br>Reset: 0x{field.reset_value:X}',container="fielddesc")           
                 out.add(f'// Description - {field.get_description_html()}', container="fielddesc")
@@ -260,25 +259,54 @@ class compose_sv(Composer):
                         out.add(f'wire {f"{pkg}t {field_hiername}":45} = {pkg}t\'({field_name_q});')
                     else:
                         field_name = declare_signal(field, assign=f'{field_name_q}', type=f'wire{" signed" if field.encoding.signed() else ""}')
-                        
-                    if field.logic_access.write_access() in [LogicAccess.C]:
-                        field_clear = declare_signal(field, "clear", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{field_clear}? '0 : ({com_acc}({field_name_q}))")
-                    elif field.logic_access.write_access() in [LogicAccess.S]:
+
+                    if field.logic_access.set_signal():
                         field_set = declare_signal(field, "set", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{field_set} ? '1 : ({com_acc}({field_name_q}))")
-                    elif field.logic_access.write_access() in [LogicAccess.SC]:
+                    if field.logic_access.clear_signal():
                         field_clear = declare_signal(field, "clear", type='logic', width=1)
-                        field_set = declare_signal(field, "set", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{field_clear} ? '0 : ({field_set} ? '1 : {com_acc}({field_name_q}))")
-                    elif field.logic_access.write_access() in [LogicAccess.U]:
+                    if field.logic_access.update_signal():
                         field_value = declare_signal(field, "value", type='logic')
                         field_update = declare_signal(field, "update", type='logic', width=1)
-                        field_name_d = declare_signal(field, "d", f"{com_acc}({field_update} ? {field_value} : {field_name_q})")
-                    elif field.logic_access.write_access() in [LogicAccess.NONE]:
-                        field_name_d = declare_signal(field, "d", f"{com_acc}({field_name_q})")
-                    else:
-                        Log.fatal(f'LogicAccess write type not supported ({field.get_name(), field.logic_access})')
+
+                    val = {Access.W: field_write_data, Access.WC: "'0", Access.WS: "'1", Access.WT: f"~{field_write_data}"}[field.access.write_value()]
+                    d_assign = f"{field_name_q}"
+                    for acc in field.logic_access.write_access().value[::-1]:
+                        if acc == 'w':
+                            d_assign = f"{field_write_access} ? {val} : ({d_assign})"
+                        elif acc == 's':
+                            d_assign = f"{field_set} ? '1 : ({d_assign})"
+                        elif acc == 'c':
+                            d_assign = f"{field_clear} ? '0 : ({d_assign})"
+                        elif acc == 'u':
+                            d_assign = f"{field_update} ? {field_value} : ({d_assign})"
+                        else:
+                            Log.fatal(f'LogicAccess write type not supported ({field.get_name(), field.logic_access})')
+                        
+                    field_name_d = declare_signal(field, "d", d_assign)
+
+                    # if field.logic_access.write_access() in [LogicAccess.WC, LogicAccess.CW]:
+                    #     field_clear = declare_signal(field, "clear", type='logic', width=1)
+                    #     field_name_d = declare_signal(field, "d", f"{field_clear}? '0 : ({com_acc}({field_name_q}))")
+                    # elif field.logic_access.write_access() in [LogicAccess.S]:
+                    #     field_set = declare_signal(field, "set", type='logic', width=1)
+                    #     field_name_d = declare_signal(field, "d", f"{field_set} ? '1 : ({com_acc}({field_name_q}))")
+                    # elif field.logic_access.write_access() in [LogicAccess.SC]:
+                    #     field_clear = declare_signal(field, "clear", type='logic', width=1)
+                    #     field_set = declare_signal(field, "set", type='logic', width=1)
+                    #     field_name_d = declare_signal(field, "d", f"{field_set} ? '1 : ({field_clear} ? '0 : {com_acc}({field_name_q}))")
+                    # elif field.logic_access.write_access() in [LogicAccess.CS]:
+                    #     field_clear = declare_signal(field, "clear", type='logic', width=1)
+                    #     field_set = declare_signal(field, "set", type='logic', width=1)
+                    #     field_name_d = declare_signal(field, "d", f"{field_clear} ? '0 : ({field_set} ? '1 : {com_acc}({field_name_q}))")
+                    # elif field.logic_access.write_access() in [LogicAccess.U]:
+                    #     field_value = declare_signal(field, "value", type='logic')
+                    #     field_update = declare_signal(field, "update", type='logic', width=1)
+                    #     field_name_d = declare_signal(field, "d", f"{com_acc}({field_update} ? {field_value} : {field_name_q})")
+                    # elif field.logic_access.write_access() in [LogicAccess.NONE]:
+                    #     field_name_d = declare_signal(field, "d", f"{com_acc}({field_name_q})")
+                    # else:
+                    #     Log.fatal(f'LogicAccess write type not supported ({field.get_name(), field.logic_access})')
+                    
                     out.add(f"{field_name_q:32} <= {field_reset};", "<=3", container=f'assign_{field.reset_signal}_{field.clock_signal}_1')
                     out.add(f"{field_name_q:32} <= {field_name_d};", "<=3", container=f'assign_{field.reset_signal}_{field.clock_signal}_2')
                     

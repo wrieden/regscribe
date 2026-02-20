@@ -323,6 +323,7 @@ class parse_xml(Parser):
             elif typ == "Access":
                 return Access(value)
             elif typ == "LogicAccess":
+                value = {"rs": "rws", "rc": "rwc", "ru": "rwu", "rsc": "rwsc", "rcs": "rwcs"}.get(value, value)
                 return LogicAccess(value)
             # elif typ == "OnReadType":
             #     return Field.OnReadType(value)
