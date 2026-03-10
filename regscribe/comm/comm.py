@@ -109,9 +109,9 @@ class ValueUpdates:
     def to_dict(self):
         d = dict()
         for node, updates in self.updates.items():
-            d[node.get_id()] = list()
+            d[node.id] = list()
             for update in updates:
-                d[node.get_id()].append({"value": update.value, "time": update.time})
+                d[node.id].append({"value": update.value, "time": update.time})
         return d
 
 

@@ -387,11 +387,12 @@ class BaseNode:
         try:
             # return self.get_raw_name().replace("{}", f"{self.instance}")
             def repl(match):
-                if (self.instance is None) and (("$" in match.group(1)) or (match.group(1) == "")):
+                inst = self.instance if self.instance else self.id
+                if (inst is None) and (("$" in match.group(1)) or (match.group(1) == "")):
                     Log.fatal(f"Instance value is None when trying to evaluate formula in name: {self.get_raw_name()} (id: {self._id})")
 
-                formula = match.group(1).replace("$", self.instance)
-                return f"{self.instance}" if match.group(1) == "" else f"{eval(formula)}"
+                formula = match.group(1).replace("$", inst)
+                return f"{inst}" if match.group(1) == "" else f"{eval(formula)}"
 
             if raw:
                 return re.sub(r"(^_|_$)","", re.sub(r"__", "_", re.sub(r"{([^}]*)}", "", self.get_raw_name())))
