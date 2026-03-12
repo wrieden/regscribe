@@ -3,10 +3,12 @@ import logging
 import os
 import pathlib
 import re
+from click import group
 import uvicorn
 from datetime import datetime
 from pathlib import Path
 from regscribe.comm.uart import comm_uart
+from regscribe.comm.dummy import comm_dummy
 
 from regscribe.converter import *
 from fastapi import FastAPI
@@ -43,17 +45,24 @@ class compose_server(Composer):
     def get_argparse(self):
         argparser = argparse.ArgumentParser(add_help=False)
         group = argparser.add_argument_group("Server Arguments")
+
+        group.add_argument("--comm", choices=["uart", "dummy"], default="uart", help="Selects the communication method")
+
         # group.add_argument("--include_defaults", action="store_true", help="Do not optimize the default values out")
         # group.add_argument("-o", "--output", type=Path, default="out.xml", help="Output xml file")
         return argparser
 
     def set_args(self, args):
         # self.output_filename: Path = args.output
+        self.comm_type = args.comm
         pass
 
     def compose(self, project: Project):
         # create comm and connect (starts background threads)
-        comm = comm_uart(project)
+        if self.comm_type == "uart":
+            comm = comm_uart(project)
+        else:
+            comm = comm_dummy(project)
         comm.connect(False)
 
         # lifespan handlers to ensure comm is closed on shutdown
