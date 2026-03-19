@@ -1448,12 +1448,12 @@ def main(cmdline=None, default_composer="xml", default_parser="xml", default_dum
 
     # eval common arg_..
     try:
-        if arg_input.startswith("http"):
-            Log.info(f"Downloading: {arg_input}")
-            r = requests.get(arg_input, allow_redirects=True)
+        if args.input.startswith("http"):
+            Log.info(f"Downloading: {args.input}")
+            r = requests.get(args.input, allow_redirects=True)
             if r.ok:
                 open(".converter_input", "wb").write(r.content)
-                arg_input = ".converter_input"
+                args.input = ".converter_input"
             else:
                 Log.fatal(f"Download failed: status code {r.status_code}\n{r.text}")
     except Exception:
