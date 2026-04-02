@@ -18,7 +18,7 @@ from line_profiler import profile
 
 
 class comm_uart:
-    def __init__(self, project: Project):
+    def __init__(self, project: Project, baudrate=115200):
         self.ser = None
         # self.last_handle_time = time.perf_counter()
         self.updates = ValueUpdates()
@@ -27,6 +27,8 @@ class comm_uart:
         # self.read_queue = bytes()
         self.requests = RequestedValues()
 
+
+        self.baudrate = baudrate
         self.rx_run = True
         self.tx_run = True
         self.handle_tx_thread = None
@@ -57,7 +59,7 @@ class comm_uart:
         while True:
             # ports = serial.tools.list_ports.grep(r"(com|USB2\.0-Serial)")
             # ports = serial.tools.list_ports.grep(r"(com|USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl)")
-            ports = serial.tools.list_ports.grep(r"(USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl)")
+            ports = serial.tools.list_ports.grep(r"(USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl|USB Serial|^JTAG Debugger$)")
             # ports = serial.tools.list_ports.grep(r"(ACM1)")
             port = next(ports, None)
             if (port is not None) or (not block):
@@ -65,7 +67,7 @@ class comm_uart:
 
         # time.sleep(1)
 
-        self.ser = serial.Serial(port=port.device, baudrate=2000000, write_timeout=1, timeout=0, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS, exclusive=True)
+        self.ser = serial.Serial(port=port.device, baudrate=self.baudrate, write_timeout=1, timeout=0, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS, exclusive=True)
         self.ser.set_low_latency_mode(True)
         fcntl.ioctl(self.ser.fileno(), termios.TIOCEXCL)
         fcntl.flock(self.ser.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -168,7 +170,8 @@ class comm_uart:
             rx_time = time.perf_counter() - rx_time
             if rx_time > 0.02:
                 Log.info(f"RX loop delay too high: {rx_time*1000:.3f} ms ({(time.process_time() - rx_cpu_time)*1000:3f} ms, pkgs recv: {recv_pkgs})")
-
+        Log.info("Ending uart rx handler thread")
+    
     @profile
     def handle_tx(self):
         Log.info("Started uart tx handler thread")
@@ -205,12 +208,13 @@ class comm_uart:
 
 
             if len(tx_bytes) > 0:
-                # Log.debug(f"Sending bytes: {tx_bytes}")
+                Log.debug(f"Sending bytes: {tx_bytes}")
                 self.ser.write(tx_bytes)
 
             tx_time = time.perf_counter() - tx_time
             if tx_time > 0.02:
                 Log.info(f"TX loop delay too high: {tx_time*1000:.3f} ms ({(time.process_time() - tx_cpu_time)*1000:.3f} ms, pkgs sent: {send_pkgs})")
+        Log.info("Ending uart tx handler thread")
 
     def disconnect(self):
         Log.info("Stopping UART handler threads")

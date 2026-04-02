@@ -50,15 +50,18 @@ class compose_sv(Composer):
         self.write_enable_signals = self.project.get_member_values("write_enable")
         
         self.write_data_signal = "write_data"
+        self.read_data_signal = "read_data"
         self.write_addr_signal = "write_addr"
         self.read_addr_signal = "read_addr"
         self.read_access_signal = "read_access"
         self.write_access_signal = "write_access"
                 
+        self.signals: svSignal = []
 
         self.build_constants()
-        self.generateInterface()                    
         self.build_packages()                    
+        self.generateModule()                    
+        self.generateInterface()                    
     
     def build_constants(self):
         out = svOutputHelper()
@@ -130,10 +133,8 @@ class compose_sv(Composer):
         out.add(f'`endif')
         
         out.write_to_file(f'{self.output}_pkg.sv')
-
-    
-
-    def generateInterface(self):         
+  
+    def generateModule(self):         
         out = svOutputHelper()
         def to_range(msb, lsb, filled = False) -> str:
             return f"[{lsb}]" if msb == lsb else f"[{msb}:{lsb}]"
@@ -146,9 +147,11 @@ class compose_sv(Composer):
         out.add(f'/* verilator lint_save */')
         out.add(f'/* verilator lint_off DECLFILENAME */')
         out.add(f'/* verilator lint_off UNUSED */')
-        out.add(f'/* svlint off package_identifier_matches_filename */')
+        out.add(f'/* svlint off interface_identifier_matches_filename */')
+        out.add(f'/* svlint off re_required_port_output */')
+        out.add(f'/* svlint off re_required_port_interface */')
 
-        out.add(f'interface {self.output.name}_reg_interface(', '>+1')
+        out.add(f'module {self.output.name}(', '>+1')
 
         for reset in sorted(list(self.reset_signals)):
             out.add(f'input  logic {reset},')
@@ -165,6 +168,9 @@ class compose_sv(Composer):
  
         for sig in sorted(list([self.write_data_signal])):
             out.add(f'input  logic [{self.regwidth-1}:0] {sig},')
+        
+        for sig in sorted(list([self.read_data_signal])):
+            out.add(f'output logic [{self.regwidth-1}:0] {sig},')
 
         out.add(f'')
 
@@ -173,6 +179,8 @@ class compose_sv(Composer):
       
         for sig in sorted(list(self.read_enable_signals | self.write_enable_signals)):
             out.add(f'input  logic {sig},')
+    
+        out.add(f'regmap_if.regmap I,')
 
 
         out.filter_last(',')
@@ -180,28 +188,28 @@ class compose_sv(Composer):
         out.add(f'', '>+1')        
         out.add('')
         
-        def declare_signal(node: BaseNode, suffix = None, assign = None, width = None, type='wire', assign_if='', assign_else='\'0') -> str:
+        def declare_signal(node: BaseNode, suffix = None, assign = None, width = None, type='wire', assign_if='', assign_else='\'0', input=False) -> str:
             width = node.width if width is None else width
             bitrange =  '' if width == 1 else f'[{width-1:2}:0] ' 
             suffix = '' if suffix is None else f"_{suffix}"
             name = f'{node.get_hier_name(mindepth=self.hier_start, join_symbol="_", filter_duplicates=True)}{suffix}'
             assign = ';' if assign is None else ((f" = ({assign_if}) ? ({assign}) : ({assign_else});") if assign_if else (f" = {assign};"))
-            out.add(f"{type:5} {bitrange:7}{name:{0 if assign == ';' else 32}}{assign}")
-            return name
-
-
+            
+            if assign != ';':
+                out.add(f"assign I.{name:{0 if assign == ';' else 32}}{assign}")
+            self.signals.append(svSignal(name, type, width, input=input))
+            return f"I.{name}"
 
         for reset in self.reset_signals:
             resedge = "posedge" if False else "negedge"
-            reset_pol = "1" if False else "0"
             for clock in self.clock_signals:
                 out.add(f'always_ff @(posedge {clock}, {resedge} {reset}) begin : assign_{reset}_{clock}', '<=1', start='\n', container=f'assign_{reset}_{clock}_1')
-                out.add(f'if ({reset} == \'{reset_pol}) begin', '<>+1', container=f'assign_{reset}_{clock}_1')
+                out.add(f'if (!{reset}) begin', '<>+1', container=f'assign_{reset}_{clock}_1')
                 out.add(f'end else begin', '<=2', container=f'assign_{reset}_{clock}_2')
         for reset in self.reset_signals:
             for clock in self.clock_signals:
                 out.add(f'always_ff @(posedge {clock}, negedge {reset}) begin : assign_{reset}_{clock}_strobe', '<=1', start='\n', container=f'assign_{reset}_{clock}_strobe_1')
-                out.add(f'if ({reset} == \'0) begin', '<>+1', container=f'assign_{reset}_{clock}_strobe_1')
+                out.add(f'if (!{reset}) begin', '<>+1', container=f'assign_{reset}_{clock}_strobe_1')
                 out.add(f'end else begin', '<=2', container=f'assign_{reset}_{clock}_strobe_2')
                    
 
@@ -261,12 +269,12 @@ class compose_sv(Composer):
                         field_name = declare_signal(field, assign=f'{field_name_q}', type=f'wire{" signed" if field.encoding.signed() else ""}')
 
                     if field.logic_access.set_signal():
-                        field_set = declare_signal(field, "set", type='logic', width=1)
+                        field_set = declare_signal(field, "set", type='logic', width=1, input=True)
                     if field.logic_access.clear_signal():
-                        field_clear = declare_signal(field, "clear", type='logic', width=1)
+                        field_clear = declare_signal(field, "clear", type='logic', width=1, input=True)
                     if field.logic_access.update_signal():
-                        field_value = declare_signal(field, "value", type='logic')
-                        field_update = declare_signal(field, "update", type='logic', width=1)
+                        field_value = declare_signal(field, "value", type='logic', input=True)
+                        field_update = declare_signal(field, "update", type='logic', width=1, input=True)
 
                     val = {Access.W: field_write_data, Access.WC: "'0", Access.WS: "'1", Access.WT: f"~{field_write_data}"}[field.access.write_value()]
                     d_assign = f"{field_name_q}"
@@ -311,8 +319,8 @@ class compose_sv(Composer):
                 if field.offset != bitpos:
                     fieldstring = f', {field.offset-bitpos}\'d0' + fieldstring
                     fieldstring_read_enable = f', {field.offset-bitpos}\'d0' + fieldstring_read_enable
-                fieldstring = f', {field_hiername}' + fieldstring
-                fieldstring_read_enable = (f', {field.read_enable} ? {field_hiername} : {field.width}\'d0' if field.read_enable else  f', {field_hiername}') + fieldstring_read_enable
+                fieldstring = f', {field_name}' + fieldstring
+                fieldstring_read_enable = (f', {field.read_enable} ? {field_name} : {field.width}\'d0' if field.read_enable else  f', {field_name}') + fieldstring_read_enable
                 bitpos = field.offset+field.width
 
             if register.width != bitpos:
@@ -341,21 +349,46 @@ class compose_sv(Composer):
                     out.add(f'end', '<-1')
                     out.add(f'end', '<-1')
 
-        out.add(f'function automatic logic [{self.regwidth-1}:0] get_read_data(logic [{self.project.address_width-1}:0] addr);', '>+1', start='\n');            
-        out.add(f'case (addr)', '>+1')
+        out.add(f'always_comb begin', '>+1', start='\n');            
+        out.add(f'case ({self.read_addr_signal})', '>+1')
         for register in self.registers:
-            out.add(f'{self.project.address_width}\'d{register.address:<3}: return {register.get_hier_name(join_symbol="_", mindepth=self.hier_start, filter_duplicates=True)}_reg_read_enable;')
-        out.add(f"default: return '0;")
+            out.add(f'{self.project.address_width}\'d{register.address:<3}: {self.read_data_signal} = I.{register.get_hier_name(join_symbol="_", mindepth=self.hier_start, filter_duplicates=True)}_reg_read_enable;')
+        out.add(f"default: {self.read_data_signal} = '0;")
         out.add(f'endcase', '<-1')
-        out.add(f'endfunction', '<-1')
+        out.add(f'end', '<-1')
         out.add(f'`include "{self.output.name}_modports.svh"')
-        out.add(f'endinterface\n', '<-1')
-        out.add(f'/* svlint on package_identifier_matches_filename */')
+        out.add(f'endmodule\n', '<-1')
+        out.add(f'/* svlint on interface_identifier_matches_filename */')
+        out.add(f'/* svlint on re_required_port_output */')
+        out.add(f'/* svlint on re_required_port_interface */')
         out.add(f'/* verilator lint_restore */')
         out.add(f'`endif')            
         out.write_to_file(f'{self.output}.sv')
   
+    def generateInterface(self):
+        out = svOutputHelper()
+        out.add(f'`ifndef {self.output.name.upper()}_IF__SV')
+        out.add(f'`define {self.output.name.upper()}_IF__SV')
 
+        out.add(f'interface {self.output.name}_if();', '>+1')
+
+        for signal in self.signals:
+            out.add(f'{signal.type:5} {"[" + str(signal.width-1) + ":0] " if signal.width > 1 else ""}{signal.name};')
+        
+        
+        out.add(f'modport regmap(', '>+1')
+        for signal in self.signals:
+            out.add(f'{"input" if signal.input else "output":6} {signal.name},')
+        out.filter_last(',')
+        out.add(f');', '<-1')
+        
+
+
+        out.add(f'`include "{self.output.name}_modports.svh"')
+        out.add(f'endinterface\n', '<-1')
+
+        out.add(f'`endif')
+        out.write_to_file(f'{self.output}_if.sv')
 class svOutputHelper(object):
     def __init__(self):
         self.texts = dict()
@@ -416,3 +449,9 @@ class svOutputHelper(object):
     def write_to_file(self, name, container = 'default'):
         with open(name, 'w', encoding="utf-8") as f:
             f.write(self.texts[container])
+class svSignal(object):
+    def __init__(self, name, type, width=1, input=True):
+        self.name = name
+        self.type = type
+        self.width = width
+        self.input = input

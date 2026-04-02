@@ -115,6 +115,61 @@ class ValueUpdates:
         return d
 
 
+# class WriteRequest:
+#     def __init__(self, addr, value):
+#         self.addr = addr
+#         self.value = value
+
+#     def __bytes__(self):
+#         return bytes(
+#             bytearray(
+#                 [
+#                     0x21 | ((self.addr & 0x03) << 6),
+#                     (self.addr >> 2) & 0xFF,
+#                     (self.value >> 0) & 0xFF,
+#                     (self.value >> 8) & 0xFF,
+#                     (self.value >> 16) & 0xFF,
+#                     (self.value >> 24) & 0xFF,
+#                 ]
+#             )
+#         )
+
+#     def __str__(self):
+#         return f"0x{self.addr:04X} -> 0x{self.value:08X}"
+
+
+# class ReadRequest:
+#     def __init__(self, addr):
+#         self.addr = addr
+
+#     def __bytes__(self):
+#         return bytes(bytearray([0x01 | ((self.addr & 0x03) << 6), (self.addr >> 2) & 0xFF]))
+
+
+# class ReadResponse:
+#     def __init__(self, bytes: bytes | bytearray):
+#         resp = bytearray(bytes)
+#         self.sync = resp[0] & 0x03
+#         self.time = (resp[0] >> 2) & 0x0F
+#         self.addr = (resp[1] << 2) | ((resp[0] & 0xC0) >> 6)
+#         self.value = resp[5] << 24 | resp[4] << 16 | resp[3] << 8 | resp[2]
+
+#     def __str__(self):
+#         return f"0x{self.addr:04X} <- 0x{self.value:08X}, {self.time}t, {self.sync}s"
+
+#     def __bytes__(self):
+#         return bytes(
+#             bytearray(
+#                 [
+#                     ((self.sync & 0x03) << 6) | ((self.time & 0x0F) << 2) | ((self.addr & 0x03) << 6),
+#                     (self.addr >> 2) & 0xFF,
+#                     (self.value >> 0) & 0xFF,
+#                     (self.value >> 8) & 0xFF,
+#                     (self.value >> 16) & 0xFF,
+#                     (self.value >> 24) & 0xFF,
+#                 ]
+#             )
+#         )
 class WriteRequest:
     def __init__(self, addr, value):
         self.addr = addr
@@ -124,12 +179,9 @@ class WriteRequest:
         return bytes(
             bytearray(
                 [
-                    0x21 | ((self.addr & 0x03) << 6),
-                    (self.addr >> 2) & 0xFF,
+                    0x05 | ((self.addr & 0x0F) << 3),
                     (self.value >> 0) & 0xFF,
                     (self.value >> 8) & 0xFF,
-                    (self.value >> 16) & 0xFF,
-                    (self.value >> 24) & 0xFF,
                 ]
             )
         )
@@ -143,30 +195,27 @@ class ReadRequest:
         self.addr = addr
 
     def __bytes__(self):
-        return bytes(bytearray([0x01 | ((self.addr & 0x03) << 6), (self.addr >> 2) & 0xFF]))
+        return bytes(bytearray([0x01 | ((self.addr & 0x0F) << 3), 0x00, 0x00]))
 
 
 class ReadResponse:
     def __init__(self, bytes: bytes | bytearray):
         resp = bytearray(bytes)
-        self.sync = resp[0] & 0x03
-        self.time = (resp[0] >> 2) & 0x0F
-        self.addr = (resp[1] << 2) | ((resp[0] & 0xC0) >> 6)
-        self.value = resp[5] << 24 | resp[4] << 16 | resp[3] << 8 | resp[2]
+        # self.sync = resp[0] & 0x03
+        # self.time = (resp[0] >> 2) & 0x0F
+        self.addr =  (resp[0] & 0x78) >> 3
+        self.value = resp[2] << 8 | resp[1]
 
     def __str__(self):
-        return f"0x{self.addr:04X} <- 0x{self.value:08X}, {self.time}t, {self.sync}s"
+        return f"0x{self.addr:04X} <- 0x{self.value:08X}"
 
     def __bytes__(self):
         return bytes(
             bytearray(
                 [
-                    ((self.sync & 0x03) << 6) | ((self.time & 0x0F) << 2) | ((self.addr & 0x03) << 6),
-                    (self.addr >> 2) & 0xFF,
+                    ((self.addr & 0x0F) << 3),
                     (self.value >> 0) & 0xFF,
-                    (self.value >> 8) & 0xFF,
-                    (self.value >> 16) & 0xFF,
-                    (self.value >> 24) & 0xFF,
+                    (self.value >> 8) & 0xFF
                 ]
             )
         )
