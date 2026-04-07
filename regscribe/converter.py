@@ -171,9 +171,9 @@ class LogicAccess(str, Enum):
     RWU = "rwu"  # read and logic write port (write strobe + level)
     RUW = "ruw"  # read and logic write port (write strobe + level)
     
-    RCU = "rcu"  # read and clear signal
-    RSU = "rsu"  # read and clear signal
-    RSCU = "rscu"  # read and clear signal
+    RWCU = "rwcu"  # read and clear signal
+    RWSU = "rwsu"  # read and clear signal
+    RWSCU = "rwscu"  # read and clear signal
     
     # RWS = "rs"  # read and set signal
     # RWC = "rc"  # read and clear signal
@@ -419,7 +419,8 @@ class BaseNode:
 
             return re.sub(r"{([^}]*)}", repl, self.get_raw_description())
         except Exception as e:
-            Log.fatal(f"Unable to build instance description of (name: {self}, instance: {self.instance}) -> {e}")
+            Log.error(f"Unable to build instance description of (name: {self}, instance: {self.instance}) -> {e}")
+            return self.get_raw_description()
             # return None
 
     def get_name_without_instance(self):
