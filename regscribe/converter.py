@@ -20,7 +20,6 @@ import math
 from math import log, log10, log2, ceil, floor
 
 import IPython.display
-from attr import field
 import latexify
 import requests
 import sympy
@@ -557,8 +556,17 @@ class BaseNode:
         else:
             return self.offset + self.parent.get_offset(depth=depth - 1)
 
-    def has_children(self):
-        return bool(self.children)
+    def has_children(self, visibility=None):
+        if visibility is None:
+            return bool(self.children)
+        elif not isinstance(visibility, list):
+            visibility = [visibility]
+
+        for child in self.get_children():
+            if child.visibility in visibility:
+                return True
+        return False
+
 
     def get_children(self, depth=1, child_type=None) -> list["Block"]:
         children = list(self.children)
@@ -966,12 +974,6 @@ class BaseNode:
         
         # if self.offset is None:
         #     Log.fatal(f'Offset is None!')
-
-    def has_public_children(self):
-        for child in self.get_children():
-            if child.visibility == Visibility.PUBLIC:
-                return True
-        return False
 
     def __str__(self):
         return f"{self.name}"
