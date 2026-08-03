@@ -114,6 +114,8 @@ class parse_xml(Parser):
         raw_width = self.get_attribute_value(xml_node, "width", "int", defaults.get("register_width", f"32"))
         raw_description = self.get_child_or_attribute_value(xml_node, ["description", "desc"], "str", "")
         raw_template = self.get_attribute_value(xml_node, "template", "bool", not(raw_name or raw_instance or raw_base_id))
+        raw_status = self.get_attribute_value(xml_node, "status", "Status", Status.IMPLEMENTED)
+
 
         defaults = self.parse_defaults(xml_node, defaults)
 
@@ -139,6 +141,7 @@ class parse_xml(Parser):
 
         else:
             node.width = raw_width
+            node.status = raw_status
             # node.set_attributes(raw_parameter_custom)
 
             if not xml_node.findall(f"./field"):
@@ -155,7 +158,7 @@ class parse_xml(Parser):
                 defaults = self.parse_defaults(
                     xml_node,
                     defaults,
-                    {"field": ["access", "logic_access", "on_write_one", "on_write_zero", "on_read", "sign", "reset", "unit", "formula", "encoding", "status"]},
+                    {"field": ["access", "logic_access", "on_write_one", "on_write_zero", "on_read", "sign", "reset", "unit", "formula", "encoding"]},
                 )
                 self.parse_field(xml_field, node, defaults)
 

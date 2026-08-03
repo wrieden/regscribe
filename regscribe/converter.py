@@ -42,6 +42,8 @@ class Status(str, Enum):
     UNDEFINED = "undefined" # definition missing
     DEPRECATED = "deprecated" # not recommended for use, will be removed in future
     REMOVED = "removed" # removed feature, should not be used
+    NEW = "new"
+    CHANGED = "changed"
 
 class Access(str, Enum):
     # When adding new modes follow the sheme:
@@ -1025,6 +1027,8 @@ class Block(BaseNode):
 # @add_mutator(True, ["width"])
 class Register(BaseNode):
     width: int = BaseNode._get_base_attr_prop("_width")
+    status: Status = BaseNode._get_base_attr_prop("_status", Status.IMPLEMENTED)
+
 
     def __init__(self, parent, name=None, description=None, offset=None, width=None, visibility: Visibility = Visibility.PUBLIC, id: str = None, template: bool = False):
         BaseNode.__init__(self, parent=parent, name=name, description=description, offset=offset, visibility=visibility, id=id, template=template)
@@ -1035,7 +1039,7 @@ class Register(BaseNode):
         self._value = self.reset_value
         self._updated = Event()
         self._changed = Event()
-
+    
     def to_dict(self):
         d = BaseNode.to_dict(self)
         d.update({"address": self.get_offset(-1), "width": self.width, "value": self.value})

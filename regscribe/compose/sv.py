@@ -259,7 +259,7 @@ class compose_sv(Composer):
                     if field.has_children():
                         out.add(f'{f"{pkg}t {field_hiername}":45};')
                     else:
-                        field_name = declare_signal(field, type=f'logic{" signed" if field.encoding.signed() else ""}')
+                        field_name = declare_signal(field, type=f'logic{" signed" if field.encoding.signed() else ""}', input=True)
                 else:
                     field_name_q = declare_signal(field, suffix="q", type="logic")
                     out.merge("fielddesc")

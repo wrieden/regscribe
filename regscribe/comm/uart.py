@@ -59,7 +59,7 @@ class comm_uart:
         while True:
             # ports = serial.tools.list_ports.grep(r"(com|USB2\.0-Serial)")
             # ports = serial.tools.list_ports.grep(r"(com|USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl)")
-            ports = serial.tools.list_ports.grep(r"(USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl|USB Serial|^JTAG Debugger$)")
+            ports = serial.tools.list_ports.grep(r"(USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl|USB Serial|^JTAG Debugger$|CP2102)")
             # ports = serial.tools.list_ports.grep(r"(ACM1)")
             port = next(ports, None)
             if (port is not None) or (not block):
