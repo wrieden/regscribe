@@ -1,50 +1,31 @@
 import time
 import threading
-from queue import SimpleQueue
-from collections import deque
 import serial
 import serial.tools.list_ports
 import termios
 import fcntl
-import os
-import selectors
 
 
-from regscribe.converter import Log, Project, Register
-from regscribe.comm.comm import RegisterMonitor
-from regscribe.comm.comm import RequestedValue, ValueUpdates, RequestedValues, ReadRequest, ReadResponse, WriteRequest
+from regscribe.converter import Log, Project
+from regscribe.comm.comm import comm, ReadRequestBase, WriteRequestBase, ReadResponseBase
 
 from line_profiler import profile
 
 
-class comm_uart:
-    def __init__(self, project: Project, baudrate=115200):
+class comm_uart(comm):
+    def __init__(self, project: Project, baudrate=115200, ReadReq:type | str = ReadRequestBase, WriteReq:type | str = WriteRequestBase, ReadResp:type | str = ReadResponseBase):
+        super().__init__(project, ReadReq=ReadReq, WriteReq=WriteReq, ReadResp=ReadResp)
+
         self.ser = None
-        # self.last_handle_time = time.perf_counter()
-        self.updates = ValueUpdates()
-        self.regmon = RegisterMonitor()
-        self.prev_sampletime = None
-        # self.read_queue = bytes()
-        self.requests = RequestedValues()
-
-
         self.baudrate = baudrate
+
         self.rx_run = True
         self.tx_run = True
         self.handle_tx_thread = None
         self.handle_rx_thread = None
 
-        self.tx_queue : SimpleQueue[ReadRequest | WriteRequest] = SimpleQueue()
-        self.project = project
 
         self.recv_pkgs = 0
-
-
-        setattr(Register, 'write', lambda node, value, _self=self: _self.write_reg(node, value))
-        setattr(Register, 'read', lambda node, _self=self: _self.read_reg(node))
-        setattr(Register, 'monitor', lambda node, priority=1, task='default', duration=None, samples=None, _self=self:
-                _self.regmon.add_listener(node=node, prio=priority, name=task, duration=duration, samples=samples))
-        setattr(Register, 'stop_monitor', lambda node, task=None, _self=self: _self.regmon.remove_listener(node, name=task))
 
 
 
@@ -52,7 +33,6 @@ class comm_uart:
         for port in serial.tools.list_ports.comports():
             Log.info(f"{port.device} {port.description}")
 
-    
         if self.ser is not None:
             self.ser.close()
 
@@ -64,8 +44,11 @@ class comm_uart:
             port = next(ports, None)
             if (port is not None) or (not block):
                 break
+            time.sleep(0.5)
 
-        # time.sleep(1)
+        if port is None:
+            Log.error("No matching serial port found")
+            return
 
         self.ser = serial.Serial(port=port.device, baudrate=self.baudrate, write_timeout=1, timeout=0, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS, exclusive=True)
         self.ser.set_low_latency_mode(True)
@@ -78,92 +61,67 @@ class comm_uart:
         Log.info("Starting UART handler threads")
         self.rx_run = True
         self.tx_run = True
+        self.start_response()
         self.handle_rx_thread = threading.Thread(target=self.handle_rx, daemon=True)
         self.handle_tx_thread = threading.Thread(target=self.handle_tx, daemon=True)
         self.handle_rx_thread.start()
         self.handle_tx_thread.start()
 
-        max_data_size = max(len(ReadRequest(0).__bytes__()), len(WriteRequest(0,0).__bytes__()), len(ReadResponse(bytes(6)).__bytes__()))
+        max_data_size = max(len(self.ReadRequest(0).__bytes__()), len(self.WriteRequest(0,0).__bytes__()), len(bytes(self.ReadResponse(bytes(64)))))
 
         self.pkgs_per_sec = self.ser.baudrate / (max_data_size * (1 + self.ser.bytesize + self.ser.stopbits))
         Log.info(f"Estimated max pkgs/sec: {self.pkgs_per_sec:.2f}, baudrate: {self.ser.baudrate}, max_data_size: {max_data_size}, stopbits: {self.ser.stopbits}")
 
-
-
-    def read_reg(self, node: Register):
-        Log.info(f"Read Register: {node.get_name()}")
-        self.tx_queue.put(ReadRequest(node.get_offset(-1)))
-        # self.requests.add(req.addr, node)
-        if not node.updated.wait(timeout=1):
-            Log.fatal(f"Timeout waiting for register read: {node.get_name()}")
-        Log.debug(f"got value: {node.value}")
-        return node.value
-
-    def write_reg(self, node: Register, value):
-        Log.info(f"Write 0x{value:08X} to Register: {node.get_name()}")
-        self.tx_queue.put(WriteRequest(node.get_offset(-1), value))
+    def disconnect(self):
+        Log.info("Stopping UART handler threads")
+        self.rx_run = False
+        self.tx_run = False
+        if self.handle_rx_thread is not None:
+            self.handle_rx_thread.join()
+        if self.handle_tx_thread is not None:
+            self.handle_tx_thread.join()
+        self.stop_response()
+        if self.ser is not None:
+            Log.info("Closing serial port")
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            self.ser.close()
 
     @profile
     def handle_rx(self):
-        Log.info("Started UART handler thread")
+        Log.info("Started handle_rx thread")
         # goodcnt = 0
         rx_bytearray = bytearray()
-        get_reg = self.project.get_register_by_address
-        read_uart = self.ser.read_all
-        received_response = self.requests.received_response
-        # fd = self.ser.fileno()
+        # get_reg = self.project.get_register_by_address
+        # __bytes__ of a dummy response reports the real datagram size; the oversized input is just padding
+        resp_bytes = len(bytes(self.ReadResponse(bytes(64))))
+        Log.info(f"RX response size: {resp_bytes} bytes")
 
-        # sel = selectors.DefaultSelector()
-        # # Register the file descriptor for "Read" events
-        # sel.register(fd, selectors.EVENT_READ)
+        ReadResponse = self.ReadResponse
+        put_response = self.resp_queue.put
+        read_all = self.ser.read_all
 
         while self.rx_run:
             # time.sleep(0.01)
             rx_time = time.perf_counter() 
             rx_cpu_time = time.process_time() 
             recv_pkgs = 0
+            debug = Log.debug_enabled()
             # self.requests.remove_old_requests(time.time_ns()-1e9)            
 
-            rx_bytearray.extend(read_uart())
-            # rx_bytearray.extend(os.read(fd, 4096))
-            # if sel.select(timeout=0.1):
-            #     rx_bytearray.extend(os.read(fd, 4096))
-            # else:
-            #     continue
+            rx_bytearray.extend(read_all())
+            while len(rx_bytearray) >= resp_bytes:
+                resp = ReadResponse(rx_bytearray[:resp_bytes])
 
-            # while self.ser.in_waiting >= 6:
-            while len(rx_bytearray) >= 6:
-                rx_data = rx_bytearray[:6]
-
-                if (rx_data[0] & 0x03) != 0x01:
-                    Log.warn(f'got wrong data {rx_data[0]}')
-                    del rx_bytearray[0]
-                    # goodcnt=0
-                    # self.requests.remove_old_requests(time.time_ns()-1e9)
-                else:
-                    del rx_bytearray[:6]
-
-                    resp = ReadResponse(rx_data)
-
-                    # Log.debug(f"RX: {resp}")
-                    
-
-                    reg = get_reg(resp.addr)
-                    reg.value = resp.value
-
-                    # Log.debug(f"Name: {reg.get_name()}")
-                    received_response(resp)
-                    
-                    if resp.time==0xF or self.prev_sampletime == None:
-                        sampletime = time.time_ns()
-                    else:
-                        sampletime = self.prev_sampletime + (resp.time*(1e9/25000))
-                    self.prev_sampletime = sampletime
-                    self.updates.add_update(reg, resp.value, sampletime)
-    
-                    
-                    
+                if resp.valid():
+                    del rx_bytearray[:resp_bytes]
+                    put_response(resp)
+                    if debug:
+                        Log.debug(f"RX: {resp}")
                     recv_pkgs+=1
+                else:           
+                    Log.warn(f'got wrong data {resp}')
+                    del rx_bytearray[0]
 
             self.recv_pkgs = (self.recv_pkgs + recv_pkgs) & 0xFFFFFFFF
 
@@ -174,7 +132,7 @@ class comm_uart:
     
     @profile
     def handle_tx(self):
-        Log.info("Started uart tx handler thread")
+        Log.info("Started handle_tx thread")
         # print(f"runnin {self.ser}")
         # goodcnt = 0
         recv_pkgs_old = 0
@@ -183,47 +141,42 @@ class comm_uart:
             # time.sleep(0.01)
             tx_time = time.perf_counter()
             tx_cpu_time = time.process_time()
+            debug = Log.debug_enabled()
 
             recv_pkgs_tmp = self.recv_pkgs
             recv_pkgs = (recv_pkgs_tmp - recv_pkgs_old) & 0xFFFFFFFF
             recv_pkgs_old = recv_pkgs_tmp
 
-            tx_bytes = bytes()
+            tx_bytes = []
             send_pkgs = 0
             # for i in range(min(1000 if self.requests.open_requests()<100 else 0, recv_pkgs * 2 + 10)):
             for send_pkgs in range(100 if self.requests.open_requests()<1000 else 0):
-                if not self.tx_queue.empty():
-                    req = self.tx_queue.get()
+                if not self.req_queue.empty():
+                    req = self.req_queue.get()
                     self.requests.add_request(req)
-                    tx_bytes += bytes(req)
+                    if debug:
+                        Log.debug(f"TX: {req}")
+                    tx_bytes.append(bytes(req))
                 else:
                     node = self.regmon.get_next()
                     if node is not None:
                         # Log.debug(f'Read Register: {node.get_name()}')
-                        req = ReadRequest(node.address)
-                        tx_bytes += bytes(req)
+                        req = self.ReadRequest(node.address)
+                        tx_bytes.append(bytes(req))
+                        if debug:
+                            Log.debug(f"TX: {req}")
                         self.requests.add_request(req)
                     else:
                         break
 
 
-            if len(tx_bytes) > 0:
-                Log.debug(f"Sending bytes: {tx_bytes}")
-                self.ser.write(tx_bytes)
+            if tx_bytes:
+                # Log.debug(f"Sending bytes: {tx_bytes.hex()}")
+                self.ser.write(b"".join(tx_bytes))
 
             tx_time = time.perf_counter() - tx_time
             if tx_time > 0.02:
                 Log.info(f"TX loop delay too high: {tx_time*1000:.3f} ms ({(time.process_time() - tx_cpu_time)*1000:.3f} ms, pkgs sent: {send_pkgs})")
         Log.info("Ending uart tx handler thread")
 
-    def disconnect(self):
-        Log.info("Stopping UART handler threads")
-        self.rx_run = False
-        self.tx_run = False
-        self.handle_rx_thread.join()
-        self.handle_tx_thread.join()
-        if self.ser is not None:
-            Log.info("Closing serial port")
-            self.ser.reset_input_buffer()
-            self.ser.reset_output_buffer()
-            self.ser.close()
+

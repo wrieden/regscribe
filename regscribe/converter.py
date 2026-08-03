@@ -1352,6 +1352,10 @@ class Log:
     def debug(msg):
         Log.log(logging.DEBUG, msg, type = None)
 
+    @staticmethod
+    def debug_enabled():
+        return logging.getLogger().isEnabledFor(logging.DEBUG)
+
 
 class Parser:
     def __init__(self):
