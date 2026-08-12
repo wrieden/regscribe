@@ -1189,7 +1189,10 @@ class Field(BaseNode):
 
     def monitor(self, priority=1, task="default", duration=None, samples=None):
         Log.info(f"Monitoring field {self.get_hier_name()}")
-        self.get_parent(priority, task, duration, samples)
+        self.parent.monitor(priority=priority, task=task, duration=duration, samples=samples)
+
+    def stop_monitor(self, task=None):
+        self.parent.stop_monitor(task=task)
 
 
     def wait(self, above=None, below=None, equal=None, delta=None, abs_delta=None):
