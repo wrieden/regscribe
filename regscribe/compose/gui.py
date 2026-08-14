@@ -309,6 +309,9 @@ class compose_gui(Composer):
         group.add_argument("--baudrate", type=int, default=115200, help="Baudrate of the uart communication")
         group.add_argument("--rate", type=int, default=1000, help="Responses per second of the dummy device")
         group.add_argument("--depth", type=int, default=10000, help="Number of samples kept per scope trace")
+        group.add_argument("--writereq", type=str, default="1A[0:6]D[0:31]", help="Write request format")
+        group.add_argument("--readreq", type=str, default="0A[0:6]0[32]", help="Read request format")
+        group.add_argument("--readresp", type=str, default="1A[0:6]D[0:31]", help="Read response format")
         group.add_argument("--visibility", choices=[v.value for v in Visibility], default=Visibility.INTERNAL.value, help="Highest visibility level that is still shown")
         return argparser
 
@@ -316,9 +319,12 @@ class compose_gui(Composer):
         self.comm_type = args.comm
         self.baudrate = args.baudrate
         self.rate = args.rate
+        self.rate = args.rate
         self.depth = args.depth
         self.visibility = Visibility(args.visibility)
-
+        self.writereq = args.writereq
+        self.readreq = args.readreq
+        self.readresp = args.readresp
     def compose(self, project: Project):
         if dpg is None:
             Log.fatal("The gui composer needs dearpygui, install it with 'pip install dearpygui'")
@@ -368,7 +374,7 @@ class RegisterGui:
         if self.options.comm_type == "uart":
             from regscribe.comm.uart import comm_uart
 
-            self.comm = comm_uart(self.project, baudrate=self.options.baudrate)
+            self.comm = comm_uart(self.project, baudrate=self.options.baudrate, ReadReq=self.options.readreq, WriteReq=self.options.writereq, ReadResp=self.options.readresp)
         elif self.options.comm_type == "dummy":
             from regscribe.comm.dummy import comm_dummy
 
