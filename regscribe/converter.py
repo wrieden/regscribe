@@ -1037,6 +1037,7 @@ class Register(BaseNode):
         self._width = width
         self._address = None
         self._value = self.reset_value
+        self._samples: list[tuple[int, int]] = []
         self._updated = Event()
         self._changed = Event()
     
@@ -1102,6 +1103,15 @@ class Register(BaseNode):
 
     def stop_monitor(self, task=None):
         Log.fatal("Register stop monitor method is not defined!")
+
+    def get_samples(self) -> dict:
+        return dict(self._samples)
+
+    def add_sample(self, value, time):
+        self._samples.append((time, value))
+
+    def clear_samples(self):
+        self._samples.clear()
 
     def __str__(self):
         return f"{self.name}"
@@ -1193,6 +1203,12 @@ class Field(BaseNode):
 
     def stop_monitor(self, task=None):
         self.parent.stop_monitor(task=task)
+
+    def get_samples(self) -> dict:
+        return {t: (value & self.mask) >> self.offset for t, value in self.parent.get_samples().items()}
+
+    def clear_samples(self):
+        self.parent.clear_samples()
 
 
     def wait(self, above=None, below=None, equal=None, delta=None, abs_delta=None):

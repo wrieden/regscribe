@@ -359,6 +359,8 @@ class comm:
 
         self.req_queue : SimpleQueue[ReadRequestBase | WriteRequestBase] = SimpleQueue()
         self.resp_queue : SimpleQueue[ReadResponseBase | None] = SimpleQueue()
+        # without a time field in the datagram every sample would carry the same timestamp
+        self.resp_has_time = "time" in getattr(self.ReadResponse, "FIELDS", ("time",))
 
         # self.last_handle_time = time.perf_counter()
         self.updates = comm.ValueUpdates()
@@ -429,12 +431,13 @@ class comm:
                 Log.debug(f"Name: {reg.get_name()}")
             self.requests.received_response(resp)
 
-            if resp.time==0xF or self.prev_sampletime == None:
+            if not self.resp_has_time or resp.time == 0xF or self.prev_sampletime == None:
                 sampletime = time.time_ns()
             else:
                 sampletime = self.prev_sampletime + (resp.time*(1e9/25000))
             self.prev_sampletime = sampletime
             self.updates.add_update(reg, resp.value, sampletime)
+            reg.add_sample(resp.value, sampletime)
 
         Log.debug("Ending response handler thread")    
 

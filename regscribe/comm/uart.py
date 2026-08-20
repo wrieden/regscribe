@@ -24,12 +24,14 @@ class comm_uart(comm):
         self.handle_tx_thread = None
         self.handle_rx_thread = None
 
+        # how many read requests may be in flight before responses start getting dropped
+        self.max_inflight = 40
 
         self.recv_pkgs = 0
 
 
 
-    def connect(self, block):
+    def connect(self, block, max_inflight=None):
         for port in serial.tools.list_ports.comports():
             Log.info(f"{port.device} {port.description}")
 
@@ -58,6 +60,17 @@ class comm_uart(comm):
         self.requests.clear()
         Log.info(f"Connected to {self.ser.port}")
 
+        max_data_size = max(len(self.ReadRequest(0).__bytes__()), len(self.WriteRequest(0,0).__bytes__()), len(bytes(self.ReadResponse(bytes(64)))))
+
+        self.pkgs_per_sec = self.ser.baudrate / (max_data_size * (1 + self.ser.bytesize + self.ser.stopbits))
+        Log.info(f"Estimated max pkgs/sec: {self.pkgs_per_sec:.2f}, baudrate: {self.ser.baudrate}, max_data_size: {max_data_size}, stopbits: {self.ser.stopbits}")
+
+        if max_inflight is None:
+            self.max_inflight = self.probe_line_capacity()
+        else:
+            self.max_inflight = max_inflight
+            Log.info(f"Line capacity probe skipped, using {self.max_inflight} requests in flight")
+
         Log.info("Starting UART handler threads")
         self.rx_run = True
         self.tx_run = True
@@ -67,10 +80,107 @@ class comm_uart(comm):
         self.handle_rx_thread.start()
         self.handle_tx_thread.start()
 
-        max_data_size = max(len(self.ReadRequest(0).__bytes__()), len(self.WriteRequest(0,0).__bytes__()), len(bytes(self.ReadResponse(bytes(64)))))
+    def _count_responses(self, data: bytearray, addr: int, resp_bytes: int):
+        """Count intact responses for `addr`, resyncing byte-wise like the rx loop does."""
+        count = 0
+        pos = 0
+        while pos + resp_bytes <= len(data):
+            resp = self.ReadResponse(data[pos:pos + resp_bytes])
+            if resp.valid() and resp.addr == addr:
+                count += 1
+                pos += resp_bytes
+            else:
+                pos += 1
+        return count
 
-        self.pkgs_per_sec = self.ser.baudrate / (max_data_size * (1 + self.ser.bytesize + self.ser.stopbits))
-        Log.info(f"Estimated max pkgs/sec: {self.pkgs_per_sec:.2f}, baudrate: {self.ser.baudrate}, max_data_size: {max_data_size}, stopbits: {self.ser.stopbits}")
+    def probe_line_capacity(self, addr=0, max_burst=4096, duration=1.0, trial_duration=0.15, step=2, min_gain=0.5, max_loss_rate=1e-3, safety_margin=0.25):
+        """Find how many read requests may be in flight before the link starts dropping responses.
+
+        Runs before the handler threads start: bursts of read requests to `addr` are written in
+        one go and the answers are counted. Burst sizes are ramped by `step` and the smallest one
+        that reaches the throughput plateau wins, which is then confirmed for `duration`.
+
+        Selecting on throughput instead of on the first lost packet is what makes the result
+        reproducible: the link loses a packet every few thousand transfers at any burst size, so
+        "largest loss free burst" is a coin flip, while throughput over the complete bursts is
+        repeatable within a few percent. The coarse ladder and `min_gain` keep the comparison well
+        outside that noise. Losses still veto a size through `max_loss_rate`.
+        """
+        req = bytes(self.ReadRequest(addr))
+        resp_bytes = len(bytes(self.ReadResponse(bytes(64))))
+        byte_time = (1 + self.ser.bytesize + int(self.ser.stopbits)) / self.ser.baudrate
+
+        def run_burst(burst):
+            self.ser.write(req * burst)
+
+            expected = burst * resp_bytes
+            # blocking read returns as soon as the burst is complete, only a loss costs the timeout
+            self.ser.timeout = burst * (len(req) + resp_bytes) * byte_time + 0.05
+            data = self.ser.read(expected)
+
+            return self._count_responses(bytearray(data), addr, resp_bytes), len(data) == expected
+
+        def drain():
+            # let stragglers of an incomplete burst arrive, flushing mid-datagram would fake a loss
+            time.sleep(0.05)
+            self.ser.reset_input_buffer()
+
+        def sustained(burst, seconds):
+            sent = recv = rounds = clean_pkgs = 0
+            clean_time = 0.0
+            drain()
+            start = time.perf_counter()
+            while time.perf_counter() - start < seconds:
+                round_start = time.perf_counter()
+                got, complete = run_burst(burst)
+                sent += burst
+                recv += got
+                rounds += 1
+                if complete:
+                    # timing only the complete bursts keeps the read timeout of a lost packet
+                    # out of the throughput, which is what makes this measurement repeatable
+                    clean_pkgs += burst
+                    clean_time += time.perf_counter() - round_start
+                else:
+                    drain()
+
+            pkgs_per_sec = clean_pkgs / clean_time if clean_time else 0.0
+            Log.info(f"Line capacity probe: burst {burst}: {recv}/{sent} responses in {rounds} bursts, "
+                     f"{sent-recv} lost, {pkgs_per_sec:.0f} pkgs/s")
+            return sent, recv, pkgs_per_sec
+
+        # settle the link: the first requests after opening the port can be swallowed
+        run_burst(1)
+
+        good = 1
+        best_pkgs_per_sec = 0.0
+        burst = 1
+        while burst <= max_burst:
+            sent, recv, pkgs_per_sec = sustained(burst, trial_duration)
+            # more requests in flight only help until the link is saturated, and past the knee the
+            # steps are worth ~10% each - far too close together to tell apart reliably
+            if pkgs_per_sec < best_pkgs_per_sec * (1 + min_gain):
+                break
+            best_pkgs_per_sec = pkgs_per_sec
+            good = burst
+            burst *= step
+
+        # confirm over the long haul, so slow drifts and rare losses show up too
+        while True:
+            sent, recv, pkgs_per_sec = sustained(good, duration)
+            if sent - recv <= 1 + max_loss_rate * sent or good == 1:
+                break
+            Log.warn(f"Line capacity probe: burst {good} loses {(sent-recv)/sent:.1e} of the responses")
+            good //= step
+
+        limit = max(1, int(good * (1 - safety_margin)))
+
+        self.ser.timeout = 0
+        self.ser.reset_input_buffer()
+        self.requests.clear()
+        Log.info(f"Line capacity probe: burst {good} confirmed at {pkgs_per_sec:.0f} pkgs/s, "
+                 f"using {limit} requests in flight")
+        return limit
 
     def disconnect(self):
         Log.info("Stopping UART handler threads")
@@ -150,7 +260,7 @@ class comm_uart(comm):
             tx_bytes = []
             send_pkgs = 0
             # for i in range(min(1000 if self.requests.open_requests()<100 else 0, recv_pkgs * 2 + 10)):
-            for send_pkgs in range(100 if self.requests.open_requests()<1000 else 0):
+            for send_pkgs in range(1 if self.requests.open_requests() < self.max_inflight else 0):
                 if not self.req_queue.empty():
                     req = self.req_queue.get()
                     self.requests.add_request(req)
