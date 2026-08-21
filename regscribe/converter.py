@@ -1098,7 +1098,7 @@ class Register(BaseNode):
     def read(self) -> int:
         Log.fatal("Register read method is not defined!")
 
-    def monitor(self, priority=1, task="default", duration=None, samples=None):
+    def monitor(self, priority=1, task="default", duration=None, samples=None, block=False):
         Log.fatal("Register monitor method is not defined!")
 
     def stop_monitor(self, task=None):
@@ -1106,6 +1106,9 @@ class Register(BaseNode):
 
     def get_samples(self) -> dict:
         return dict(self._samples)
+
+    def sample_count(self) -> int:
+        return len(self._samples)
 
     def add_sample(self, value, time):
         self._samples.append((time, value))
@@ -1197,15 +1200,18 @@ class Field(BaseNode):
         self.parent.read()
         return self.value
 
-    def monitor(self, priority=1, task="default", duration=None, samples=None):
+    def monitor(self, priority=1, task="default", duration=None, samples=None, block=False):
         Log.info(f"Monitoring field {self.get_hier_name()}")
-        self.parent.monitor(priority=priority, task=task, duration=duration, samples=samples)
+        self.parent.monitor(priority=priority, task=task, duration=duration, samples=samples, block=block)
 
     def stop_monitor(self, task=None):
         self.parent.stop_monitor(task=task)
 
     def get_samples(self) -> dict:
         return {t: (value & self.mask) >> self.offset for t, value in self.parent.get_samples().items()}
+
+    def sample_count(self) -> int:
+        return self.parent.sample_count()
 
     def clear_samples(self):
         self.parent.clear_samples()

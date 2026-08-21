@@ -4,7 +4,7 @@ from regscribe.converter import Log, Register
 import re
 import time
 from queue import SimpleQueue, Empty
-from threading import Lock
+from threading import Lock, Event
 import threading
 
 class WriteRequestBase:
@@ -213,30 +213,48 @@ def read_response_class(spec: str) -> type[ReadResponseBase]:
 
 
 class comm:
+    class Listener:
+        def __init__(self, priority, samples=None, duration=None):
+            self.priority = priority
+            self.samples = samples
+            self.deadline = None if duration is None else time.monotonic() + duration
+            self.issued = 0
+            self.done = Event()
+
     class Monitored:
         def __init__(self, node):
             self.node = node
-            self.priority = dict()
+            self.listener: dict[str, comm.Listener] = dict()
             self.counter = 1
 
-        def add_listener(self, name, priority):
-            self.priority[name] = priority
+        def add_listener(self, name, priority, samples=None, duration=None) -> comm.Listener:
+            self.listener[name] = comm.Listener(priority, samples=samples, duration=duration)
             self.counter = min([self.counter, self.lowest_priority()])
+            return self.listener[name]
 
         def reset_counter(self):
             self.counter = self.lowest_priority()
 
         def remove_listener(self, name):
-            if name is None:
-                self.priority.clear()
-            else:
-                self.priority.pop(name, None)
+            for listener in list(self.listener) if name is None else [name]:
+                done = self.listener.pop(listener, None)
+                if done is not None:
+                    done.done.set()
+
+        def take_sample(self):
+            now = time.monotonic()
+            for name, listener in list(self.listener.items()):
+                listener.issued += 1
+                if listener.samples is not None:
+                    listener.samples -= 1
+                if (listener.samples is not None and listener.samples <= 0) or (listener.deadline is not None and now >= listener.deadline):
+                    self.remove_listener(name)
 
         def lowest_priority(self):
-            return min(self.priority.values())
+            return min(listener.priority for listener in self.listener.values())
 
         def has_listener(self):
-            return bool(self.priority)
+            return bool(self.listener)
 
     class RegisterMonitor:
         def __init__(self, ):
@@ -244,16 +262,18 @@ class comm:
             self.it = iter(self.monitored.values())
             self.lock = Lock()
 
-        def add_listener(self, node, name, prio, samples=None, duration=None):
+        def add_listener(self, node, name, prio, samples=None, duration=None) -> comm.Listener | None:
             if prio == 0:
                 self.remove_listener(node, name)
+                return None
             else:
                 with self.lock:
                     mon = self.monitored.pop(node, comm.Monitored(node))
-                    mon.add_listener(name, prio)
+                    listener = mon.add_listener(name, prio, samples=samples, duration=duration)
                     self.monitored[node] = mon
 
                     self.it = iter(self.monitored.values())
+                    return listener
 
         def remove_listener(self, node, name):
             with self.lock:
@@ -276,6 +296,10 @@ class comm:
 
                     if mon.counter <= 1:
                         mon.reset_counter()
+                        mon.take_sample()
+                        if not mon.has_listener():
+                            self.monitored.pop(mon.node, None)
+                            self.it = iter(self.monitored.values())
                         return mon.node
                     else:
                         mon.counter -= 1
@@ -375,8 +399,8 @@ class comm:
 
         setattr(Register, 'write', lambda node, value, _self=self: _self.write_reg(node, value))
         setattr(Register, 'read', lambda node, _self=self: _self.read_reg(node))
-        setattr(Register, 'monitor', lambda node, priority=1, task='default', duration=None, samples=None, _self=self:
-                _self.regmon.add_listener(node=node, prio=priority, name=task, duration=duration, samples=samples))
+        setattr(Register, 'monitor', lambda node, priority=1, task='default', duration=None, samples=None, block=False, _self=self:
+                _self.monitor_reg(node, priority=priority, task=task, duration=duration, samples=samples, block=block))
         setattr(Register, 'stop_monitor', lambda node, task=None, _self=self: _self.regmon.remove_listener(node, name=task))
 
 
@@ -394,6 +418,22 @@ class comm:
         self.resp_queue.put(None)  # wake the blocking get
         self.handle_response_thread.join()
         self.handle_response_thread = None
+
+    def monitor_reg(self, node: Register, priority=1, task="default", duration=None, samples=None, block=False, timeout=1):
+        if block and duration is None and samples is None:
+            Log.fatal(f"Blocking monitor of {node.get_name()} needs a duration or a sample count")
+        start = node.sample_count()
+        listener = self.regmon.add_listener(node=node, prio=priority, name=task, duration=duration, samples=samples)
+        if not block or listener is None:
+            return
+        listener.done.wait()
+
+        # the listener ends once the last request is sent, its responses are still on the way
+        deadline = time.monotonic() + timeout
+        while node.sample_count() - start < listener.issued and time.monotonic() < deadline:
+            time.sleep(0.001)
+        if node.sample_count() - start < listener.issued:
+            Log.warn(f"Only got {node.sample_count() - start} of {listener.issued} samples of {node.get_name()}")
 
     def read_reg(self, node: Register):
         Log.info(f"Read Register: {node.get_name()}")
