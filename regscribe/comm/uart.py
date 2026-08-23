@@ -41,7 +41,7 @@ class comm_uart(comm):
         while True:
             # ports = serial.tools.list_ports.grep(r"(com|USB2\.0-Serial)")
             # ports = serial.tools.list_ports.grep(r"(com|USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl)")
-            ports = serial.tools.list_ports.grep(r"(USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl|USB Serial|^JTAG Debugger$|CP2102)")
+            ports = serial.tools.list_ports.grep(r"(USB2\.0-Serial|STLINK-V3 - ST-Link VCP Ctrl|USB Serial|^JTAG Debugger$|CP2102|FT232H)")
             # ports = serial.tools.list_ports.grep(r"(ACM1)")
             port = next(ports, None)
             if (port is not None) or (not block):
@@ -260,7 +260,7 @@ class comm_uart(comm):
             tx_bytes = []
             send_pkgs = 0
             # for i in range(min(1000 if self.requests.open_requests()<100 else 0, recv_pkgs * 2 + 10)):
-            for send_pkgs in range(1 if self.requests.open_requests() < self.max_inflight else 0):
+            for send_pkgs in range(10 if self.requests.open_requests() < self.max_inflight else 0):
                 if not self.req_queue.empty():
                     req = self.req_queue.get()
                     self.requests.add_request(req)

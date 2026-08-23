@@ -69,6 +69,18 @@ class compose_sv(Composer):
         out.add(f'`define {self.output.name.upper()}__SVH')
 
         out.add(f'`define {self.output.name.upper()}_ADDRESS_WIDTH {self.project.address_width}')
+        out.add(f'`define {self.output.name.upper()}_DATA_WIDTH {self.regwidth}')
+
+        out.add(f'`ifdef MAX_COMPATIBILITY')
+        out.add(f'{"`define REGSCRIBE_ENUM_TYPE(pkg, kind, msb) ":64}kind logic [msb:0]')
+        out.add(f'{"`define REGSCRIBE_ENUM_CAST(pkg, value) ":64}value')
+        out.add(f'{"`define REGSCRIBE_ENUM_RESET(pkg, name, value) ":64}value')
+        out.add(f'`else')
+        out.add(f'{"`define REGSCRIBE_ENUM_TYPE(pkg, kind, msb) ":64}kind pkg::t')
+        out.add(f'{"`define REGSCRIBE_ENUM_CAST(pkg, value) ":64}pkg::t\'(value)')
+        out.add(f'{"`define REGSCRIBE_ENUM_RESET(pkg, name, value) ":64}pkg::name')
+        out.add(f'`endif')
+
         out.add(f'// register defines')        
         out.add(f'`define BASEMODPORT \\', '>+1', container='port_monitor')        
 
@@ -81,10 +93,11 @@ class compose_sv(Composer):
                 field_hiername_raw = field.get_hier_name(join_symbol="_", mindepth=self.hier_start, filter_duplicates=True, use_raw_name=True)
                 if(not field.is_instance(depth=-1)):
                     out.add(f'{f"`define {field_hiername_raw}_WIDTH ":64}{field.width}')
+                    reset_value = f'(`{field_hiername_raw}_WIDTH\'(\'h{field.reset_value:X}))'
                     if field.has_children():
-                        out.add(f'{f"`define {field_hiername_raw}_RESET ":64}{field_hiername_raw}_pkg::{field.get_child_by_offset(field.reset_value).get_name()}')
+                        out.add(f'{f"`define {field_hiername_raw}_RESET ":64}`REGSCRIBE_ENUM_RESET({field_hiername_raw}_pkg, {field.get_child_by_offset(field.reset_value).get_name()}, {reset_value})')
                     else:
-                        out.add(f'{f"`define {field_hiername_raw}_RESET ":64}(`{field_hiername_raw}_WIDTH\'(\'h{field.reset_value:X}))')
+                        out.add(f'{f"`define {field_hiername_raw}_RESET ":64}{reset_value}')
                 out.add(f'{f"`define {field_hiername}_SHIFT ":64}{field.offset}')
                 out.add(f'{f"`define {field_hiername}_LSB ":64}`{field_hiername}_SHIFT')
                 out.add(f'{f"`define {field_hiername}_MSB ":64}(`{field_hiername}_SHIFT+`{field_hiername_raw}_WIDTH-1)')
@@ -122,7 +135,7 @@ class compose_sv(Composer):
                 out.add(f'package {field_hiername}_pkg;', '>+1')
                 out.add(f'typedef enum logic [`{field_hiername}_WIDTH-1:0]{{','>+1')
                 for choice in field.get_children():
-                    out.add(f'{choice.get_name():32} = \'d{choice.offset},')
+                    out.add(f'{choice.get_name():32} = `{field_hiername}_WIDTH\'d{choice.offset},')
                 out.filter_last(',')
                 out.add(f'}} t;', '<-1')
                 out.add(f'endpackage\n', '<-1')
@@ -161,16 +174,16 @@ class compose_sv(Composer):
         out.add(f'')
         
         for sig in sorted(list({self.read_addr_signal, self.write_addr_signal})):
-            out.add(f'input  logic [{self.project.address_width-1}:0] {sig},')
+            out.add(f'input  logic [`{self.output.name.upper()}_ADDRESS_WIDTH-1:0] {sig},')
             
         for sig in sorted(list([self.read_access_signal] + [self.write_access_signal])):
             out.add(f'input  logic {sig},')
  
         for sig in sorted(list([self.write_data_signal])):
-            out.add(f'input  logic [{self.regwidth-1}:0] {sig},')
+            out.add(f'input  logic [`{self.output.name.upper()}_DATA_WIDTH-1:0] {sig},')
         
         for sig in sorted(list([self.read_data_signal])):
-            out.add(f'output logic [{self.regwidth-1}:0] {sig},')
+            out.add(f'output logic [`{self.output.name.upper()}_DATA_WIDTH-1:0] {sig},')
 
         out.add(f'')
 
@@ -188,16 +201,23 @@ class compose_sv(Composer):
         out.add(f'', '>+1')        
         out.add('')
         
-        def declare_signal(node: BaseNode, suffix = None, assign = None, width = None, type='wire', assign_if='', assign_else='\'0', input=False) -> str:
-            width = node.width if width is None else width
-            bitrange =  '' if width == 1 else f'[{width-1:2}:0] ' 
+        def declare_signal(node: BaseNode, suffix = None, assign = None, width = None, type='wire', assign_if='', assign_else='\'0', input=False, enum_type=None) -> str:
+            width_name = None
+            if width is None:
+                width = node.width
+                if isinstance(node, Field):
+                    width_name = f'`{node.get_hier_name(mindepth=self.hier_start, join_symbol="_", filter_duplicates=True, use_raw_name=True)}_WIDTH'
+                elif width == self.regwidth:
+                    width_name = f'`{self.output.name.upper()}_DATA_WIDTH'
             suffix = '' if suffix is None else f"_{suffix}"
             name = f'{node.get_hier_name(mindepth=self.hier_start, join_symbol="_", filter_duplicates=True)}{suffix}'
-            assign = ';' if assign is None else ((f" = ({assign_if}) ? ({assign}) : ({assign_else});") if assign_if else (f" = {assign};"))
-            
-            if assign != ';':
-                out.add(f"assign I.{name:{0 if assign == ';' else 32}}{assign}")
-            self.signals.append(svSignal(name, type, width, input=input))
+
+            if assign is not None:
+                expr = f"({assign_if}) ? ({assign}) : ({assign_else})" if assign_if else f"{assign}"
+                if enum_type is not None:
+                    expr = f"`REGSCRIBE_ENUM_CAST({enum_type}, {expr})"
+                out.add(f"assign I.{name:32} = {expr};")
+            self.signals.append(svSignal(name, type, width, input=input, enum_type=enum_type, width_name=width_name))
             return f"I.{name}"
 
         for reset in self.reset_signals:
@@ -232,7 +252,7 @@ class compose_sv(Composer):
                 field_hiername = field.get_hier_name(join_symbol="_", mindepth=self.hier_start, filter_duplicates=True)
                 field_hiername_raw = field.get_hier_name(join_symbol="_", mindepth=self.hier_start, filter_duplicates=True, use_raw_name=True)
 
-                pkg = f'{field_hiername_raw}_pkg::'
+                enum_type = f'{field_hiername_raw}_pkg' if field.has_children() else None
                 acc = {Access.W: None, Access.W0: 0, Access.W1: 1}[field.access.write_if()]
 
                 field_reset = declare_signal(field, "reset", f'`{field_hiername_raw}_RESET')
@@ -253,20 +273,14 @@ class compose_sv(Composer):
 
                 if field.logic_access in [LogicAccess.NONE] and not field.access.can_write():
                     out.merge("fielddesc")
-                    field_name = declare_signal(field, assign=f'{field_reset}', type=f'wire{" signed" if field.encoding.signed() else ""}')
+                    field_name = declare_signal(field, assign=f'{field_reset}', type=f'wire{" signed" if field.encoding.signed() else ""}', enum_type=enum_type)
                 elif field.logic_access.write_access() in [LogicAccess.W]:
                     out.merge("fielddesc")
-                    if field.has_children():
-                        out.add(f'{f"{pkg}t {field_hiername}":45};')
-                    else:
-                        field_name = declare_signal(field, type=f'logic{" signed" if field.encoding.signed() else ""}', input=True)
+                    field_name = declare_signal(field, type=f'logic{" signed" if field.encoding.signed() else ""}', input=True, enum_type=enum_type)
                 else:
                     field_name_q = declare_signal(field, suffix="q", type="logic")
                     out.merge("fielddesc")
-                    if field.has_children():
-                        out.add(f'wire {f"{pkg}t {field_hiername}":45} = {pkg}t\'({field_name_q});')
-                    else:
-                        field_name = declare_signal(field, assign=f'{field_name_q}', type=f'wire{" signed" if field.encoding.signed() else ""}')
+                    field_name = declare_signal(field, assign=f'{field_name_q}', type=f'wire{" signed" if field.encoding.signed() else ""}', enum_type=enum_type)
 
                     if field.logic_access.set_signal():
                         field_set = declare_signal(field, "set", type='logic', width=1, input=True)
@@ -370,10 +384,17 @@ class compose_sv(Composer):
         out.add(f'`ifndef {self.output.name.upper()}_IF__SV')
         out.add(f'`define {self.output.name.upper()}_IF__SV')
 
+        out.add(f'`include "{self.output.name}.svh"')
+
         out.add(f'interface {self.output.name}_if();', '>+1')
 
         for signal in self.signals:
-            out.add(f'{signal.type:5} {"[" + str(signal.width-1) + ":0] " if signal.width > 1 else ""}{signal.name};')
+            msb = f'{signal.width_name}-1' if signal.width_name else f'{signal.width-1}'
+            if signal.enum_type is None:
+                bitrange = f'[{msb}:0] ' if (signal.width > 1 or signal.width_name) else ''
+                out.add(f'{signal.type:5} {bitrange}{signal.name};')
+            else:
+                out.add(f'`REGSCRIBE_ENUM_TYPE({signal.enum_type}, {"wire" if signal.type.startswith("wire") else "var"}, {msb}) {signal.name};')
         
         
         out.add(f'modport regmap(', '>+1')
@@ -450,8 +471,10 @@ class svOutputHelper(object):
         with open(name, 'w', encoding="utf-8") as f:
             f.write(self.texts[container])
 class svSignal(object):
-    def __init__(self, name, type, width=1, input=True):
+    def __init__(self, name, type, width=1, input=True, enum_type=None, width_name=None):
         self.name = name
         self.type = type
         self.width = width
         self.input = input
+        self.enum_type = enum_type
+        self.width_name = width_name
