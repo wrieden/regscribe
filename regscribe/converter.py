@@ -1092,6 +1092,42 @@ class Register(BaseNode):
     #         child.calculate_offsets()
     #         offset = child.offset + child.width
 
+    def write_all(self, **fields):
+        values = dict(fields)
+        value = 0
+        for field in self.get_children(child_type=Field):
+            name = field.get_name()
+            if name not in values:
+                Log.fatal(f"Missing value for field {name} in write_all of {self.get_hier_name()}")
+            val = values.pop(name)
+            if isinstance(val, Choice):
+                if val.parent.get_base() is not field.get_base():
+                    Log.fatal(f"Choice {val.get_name()} belongs to field {val.parent.get_name()}, not to {name} ({self.get_hier_name()})")
+                val = val.offset
+            elif isinstance(val, str):
+                choice = field.get_child_by_name(val)
+                if choice is None:
+                    Log.fatal(f"Field {name} has no choice named {val} ({self.get_hier_name()})")
+                val = choice.offset
+            if not isinstance(val, int):
+                Log.fatal(f"Value for field {name} must be an int or a choice name ({self.get_hier_name()})")
+            if not (-(1 << (field.width - 1)) <= val < (1 << field.width)):
+                Log.fatal(f"Value {val} does not fit into field {name} ({field.width}bit, {self.get_hier_name()})")
+            val &= (1 << field.width) - 1
+            value |= val << field.offset
+        if values:
+            Log.fatal(f"Unknown fields for {self.get_hier_name()}: {', '.join(values)}")
+        self.write(value)
+
+    def write_fields(self, **fields):
+        value = self.read()
+        values = {f.get_name(): (value & f.mask) >> f.offset for f in self.get_children(child_type=Field)}
+        unknown = set(fields) - set(values)
+        if unknown:
+            Log.fatal(f"Unknown fields for {self.get_hier_name()}: {', '.join(sorted(unknown))}")
+        values.update(fields)
+        self.write_all(**values)
+
     def write(self, value):
         Log.fatal("Register write method is not defined!")
 

@@ -27,7 +27,7 @@ def get_composer():
 
 
 class compose_python_tree(Composer):
-    def __init__(self, output_filename: Path, only_if_changed: bool = False, exclude_types: bool = False):
+    def __init__(self, output_filename: Path = Path("out.py"), only_if_changed: bool = False, exclude_types: bool = False):
         self.output_filename = output_filename
         self.only_if_changed = only_if_changed
         self.exclude_types = exclude_types
@@ -95,6 +95,7 @@ class compose_python_tree(Composer):
         struct_text = self.text_helper()
         struct_text.add_pre(f"{expected_line}")
         struct_text.add_pre(f"from __future__ import annotations")
+        struct_text.add_pre(f"from typing import Literal")
         struct_text.add_pre(f"from regscribe.converter import Project, Block, Register, Field, Choice")
         self.eval_node(self.project, struct_text)
 
@@ -116,6 +117,20 @@ class compose_python_tree(Composer):
             xml_attributes = ET.SubElement(parent, "attributes")
             for attr_name, attr_value in attributes.items():
                 self.set_attribute(xml_attributes, f"{attr_name}", f"{attr_value}")
+
+    # signature only overrides, so autocomplete offers the fields of this register
+    def get_write_methods(self, register: Register):
+        text = self.text_helper()
+        params = list()
+        for field in register.get_children(child_type=Field):
+            hint = "int"
+            if field.has_children():
+                hint += " | Choice | Literal[" + ", ".join(f'"{c.get_name()}"' for c in field.get_children()) + "]"
+            params.append((field.get_name(), hint))
+
+        text.add_pre(f"def write_all(self, *, " + ", ".join(f"{name}: {hint}" for name, hint in params) + ") -> None: ...")
+        text.add_pre(f"def write_fields(self, *, " + ", ".join(f"{name}: {hint} | None = None" for name, hint in params) + ") -> None: ...")
+        return text
 
     def eval_node(self, node : BaseNode, struct_text):
         Log.debug(f"Writing Node: {node.name}")
@@ -145,6 +160,9 @@ class compose_python_tree(Composer):
                     child_text = self.text_helper()
                     self.eval_node(child, child_text)
                     struct_text.add_child(child_text)
+
+                if isinstance(node, Register) and node.get_children(child_type=Field):
+                    struct_text.add_child(self.get_write_methods(node))
 
                 # struct_text.add_post(f'    pass')
 
