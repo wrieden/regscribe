@@ -1207,9 +1207,14 @@ class Field(BaseNode):
     def lsb(self) -> int:
         return self.offset
 
+    def to_signed(self, val: int) -> int:
+        if (self.encoding is not None) and self.encoding.signed() and (val & (1 << (self.width - 1))):
+            return val - (1 << self.width)
+        return val
+
     @property
     def value(self) -> int:
-        return (self.parent.value & self.mask) >> self.offset
+        return self.to_signed((self.parent.value & self.mask) >> self.offset)
 
     @value.setter
     def value(self, val: int):
@@ -1244,7 +1249,7 @@ class Field(BaseNode):
         self.parent.stop_monitor(task=task)
 
     def get_samples(self) -> dict:
-        return {t: (value & self.mask) >> self.offset for t, value in self.parent.get_samples().items()}
+        return {t: self.to_signed((value & self.mask) >> self.offset) for t, value in self.parent.get_samples().items()}
 
     def sample_count(self) -> int:
         return self.parent.sample_count()
