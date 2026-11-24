@@ -392,6 +392,8 @@ class comm:
         self.prev_sampletime = None
         # self.read_queue = bytes()
         self.requests = comm.RequestedValues()
+        # a read waits on its own event, the pulsed Register.updated can be missed when the response is faster than the caller
+        self.read_waiters: dict[Register, Event] = dict()
 
         self.response_run = True
         self.handle_response_thread = None
@@ -437,9 +439,12 @@ class comm:
 
     def read_reg(self, node: Register):
         Log.info(f"Read Register: {node.get_name()}")
+        done = Event()
+        self.read_waiters[node] = done
         self.req_queue.put(self.ReadRequest(node.get_offset(-1)))
         # self.requests.add(req.addr, node)
-        if not node.updated.wait(timeout=1):
+        if not done.wait(timeout=1):
+            self.read_waiters.pop(node, None)
             Log.fatal(f"Timeout waiting for register read: {node.get_name()}")
         Log.debug(f"got value: {node.value}")
         return node.value
@@ -478,6 +483,10 @@ class comm:
             self.prev_sampletime = sampletime
             self.updates.add_update(reg, resp.value, sampletime)
             reg.add_sample(resp.value, sampletime)
+
+            done = self.read_waiters.pop(reg, None)
+            if done is not None:
+                done.set()
 
         Log.debug("Ending response handler thread")    
 
